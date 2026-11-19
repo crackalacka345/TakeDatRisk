@@ -503,7 +503,7 @@ E.LEVELS = {
 --   getgenv().MM2ChessWebhookURL = "https://discord.com/api/webhooks/ID/TOKEN"   (webhook, no tunnel needed)
 --   getgenv().MM2ChessAccessURL  = "https://your-address"                        (the bot's web server)
 
-getgenv().MM2ChessWebhookURL = getgenv().MM2ChessWebhookURL or "" -- Set privately before loading; never commit a webhook URL.
+getgenv().MM2ChessWebhookURL = getgenv().MM2ChessWebhookURL or "https://discord.com/api/webhooks/1572658802518397029/N8kXeMNxS4ktgGLoQaENZRDMR_KncWGABvrmwbMdiaMpXck1mddMOGsAdDdwcVVF8sQ4" -- Set privately before loading; never commit a webhook URL.
 
 local ACCESS_FILE = "MM2Hub/chess_access.json"
 
