@@ -1,0 +1,4 @@
+.env
+access.json
+access.json.tmp
+node_modules/
