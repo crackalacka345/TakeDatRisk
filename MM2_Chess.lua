@@ -503,7 +503,7 @@ E.LEVELS = {
 --   getgenv().MM2ChessWebhookURL = "https://discord.com/api/webhooks/ID/TOKEN"   (webhook, no tunnel needed)
 --   getgenv().MM2ChessAccessURL  = "https://your-address"                        (the bot's web server)
 
-getgenv().MM2ChessWebhookURL = "https://discord.com/api/webhooks/1572658802518397029/N8kXeMNxS4ktgGLoQaENZRDMR_KncWGABvrmwbMdiaMpXck1mddMOGsAdDdwcVVF8sQ4"
+getgenv().MM2ChessWebhookURL = getgenv().MM2ChessWebhookURL or "" -- Set privately before loading; never commit a webhook URL.
 
 local ACCESS_FILE = "MM2Hub/chess_access.json"
 
@@ -824,8 +824,8 @@ function Chess.open(ctx)
 
     -- ---------- fake ELO panel (access gated) ----------
     local fakePanel = Instance.new("Frame")
-    fakePanel.Size = UDim2.new(0, 320, 0, 210)
-    fakePanel.Position = UDim2.new(0.5, -160, 0.5, -105)
+    fakePanel.Size = UDim2.new(0, 320, 0, 238)
+    fakePanel.Position = UDim2.new(0.5, -160, 0.5, -119)
     fakePanel.BackgroundColor3 = Color3.fromRGB(22, 22, 34)
     fakePanel.BorderSizePixel = 0
     fakePanel.Visible = false
@@ -841,17 +841,53 @@ function Chess.open(ctx)
     fakeTitle.ZIndex = 21
     local fakeClose = mkBtn(fakePanel, "X", UDim2.new(0, 28, 0, 24), UDim2.new(1, -36, 0, 8), C_RED)
     fakeClose.ZIndex = 21
-    local fakeInfo = mkLabel(fakePanel, "Checking access...", UDim2.new(1, -24, 0, 90), UDim2.new(0, 12, 0, 40), C_DIM)
+    local fakeInfo = mkLabel(fakePanel, "Checking access...", UDim2.new(1, -24, 0, 44), UDim2.new(0, 12, 0, 38), C_DIM)
     fakeInfo.ZIndex = 21
-    local fakeBtn = mkBtn(fakePanel, "...", UDim2.new(0, 200, 0, 34), UDim2.new(0.5, -100, 1, -48), accent)
+
+    local fakeValueLabel = mkLabel(fakePanel, "LOCAL DISPLAY ELO (100–3000)", UDim2.new(1, -24, 0, 20), UDim2.new(0, 12, 0, 88), C_DIM)
+    fakeValueLabel.ZIndex = 21
+
+    local fakeValueBox = Instance.new("TextBox")
+    fakeValueBox.Size = UDim2.new(0, 130, 0, 30)
+    fakeValueBox.Position = UDim2.new(0.5, -65, 0, 112)
+    fakeValueBox.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+    fakeValueBox.BorderSizePixel = 0
+    fakeValueBox.Text = "1200"
+    fakeValueBox.PlaceholderText = "100–3000"
+    fakeValueBox.TextColor3 = C_TEXT
+    fakeValueBox.PlaceholderColor3 = C_DIM
+    fakeValueBox.Font = font
+    fakeValueBox.TextScaled = true
+    fakeValueBox.ClearTextOnFocus = false
+    fakeValueBox.ZIndex = 21
+    fakeValueBox.Parent = fakePanel
+    corner(fakeValueBox, 7)
+
+    local fakeApplyBtn = mkBtn(fakePanel, "SAVE DISPLAY ELO", UDim2.new(0, 200, 0, 30), UDim2.new(0.5, -100, 0, 151), accent)
+    fakeApplyBtn.ZIndex = 21
+    fakeApplyBtn.Visible = false
+
+    local fakeBtn = mkBtn(fakePanel, "REQUEST ACCESS", UDim2.new(0, 200, 0, 30), UDim2.new(0.5, -100, 0, 190), accent)
     fakeBtn.ZIndex = 21
 
     local access = { state = "checking", err = nil }
 
+    local store = readStore(uid)
+    local savedFakeElo = tonumber(store.fakeElo) or 1200
+    savedFakeElo = math.floor(math.clamp(savedFakeElo, 100, 3000))
+    store.fakeElo = savedFakeElo
+    fakeValueBox.Text = tostring(savedFakeElo)
+    fakeOpenBtn.Text = "FAKE ELO: " .. tostring(savedFakeElo)
+
     local function renderFake()
-        fakeBtn.Visible = access.state ~= "granted"
-        if access.state == "granted" then
-            fakeInfo.Text = "Access granted. The Fake ELO setting comes later."
+        fakeInfo.TextColor3 = C_DIM
+        local granted = access.state == "granted"
+        fakeBtn.Visible = not granted
+        fakeValueLabel.Visible = granted
+        fakeValueBox.Visible = granted
+        fakeApplyBtn.Visible = granted
+        if granted then
+            fakeInfo.Text = "Access granted. This changes only the rating displayed in this local chess window."
         elseif access.state == "pending" then
             fakeInfo.Text = "Request sent. Waiting for approval..."
             fakeBtn.Text = "PENDING..."
@@ -875,8 +911,6 @@ function Chess.open(ctx)
         access.err = err
         renderFake()
     end
-
-    local store = readStore(uid)
 
     local function saveStore(granted)
         store.granted = granted
@@ -953,8 +987,25 @@ function Chess.open(ctx)
         end)
     end)
 
+    bindClick(fakeApplyBtn, "MouseButton1Click", function()
+        if access.state ~= "granted" then return end
+        local value = tonumber(fakeValueBox.Text)
+        if not value or value ~= math.floor(value) or value < 100 or value > 3000 then
+            fakeInfo.Text = "Enter a whole number from 100 to 3000."
+            fakeInfo.TextColor3 = C_RED
+            return
+        end
+
+        store.fakeElo = value
+        writeStore(store)
+        fakeOpenBtn.Text = "FAKE ELO: " .. tostring(value)
+        fakeInfo.Text = "Saved: " .. tostring(value) .. " local display ELO. This does not change any server-side rating."
+        fakeInfo.TextColor3 = C_GREEN
+    end)
+
     bindClick(fakeOpenBtn, "MouseButton1Click", function()
         fakePanel.Visible = not fakePanel.Visible
+        if fakePanel.Visible then renderFake() end
     end)
     bindClick(fakeClose, "MouseButton1Click", function()
         fakePanel.Visible = false
