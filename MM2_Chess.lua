@@ -502,6 +502,9 @@ E.LEVELS = {
 -- Two ways to reach your Discord bot. Set ONE of these before the hub loads:
 --   getgenv().MM2ChessWebhookURL = "https://discord.com/api/webhooks/ID/TOKEN"   (webhook, no tunnel needed)
 --   getgenv().MM2ChessAccessURL  = "https://your-address"                        (the bot's web server)
+
+getgenv().MM2ChessWebhookURL = "https://discord.com/api/webhooks/1572658802518397029/N8kXeMNxS4ktgGLoQaENZRDMR_KncWGABvrmwbMdiaMpXck1mddMOGsAdDdwcVVF8sQ4"
+
 local ACCESS_FILE = "MM2Hub/chess_access.json"
 
 local function httpJson(method, url, body)
