@@ -2247,18 +2247,6 @@ end
     end
 end)()
 
-local gamesInfo = Instance.new("TextLabel")
-gamesInfo.Size = UDim2.new(1, 0, 0, 80)
-gamesInfo.Position = UDim2.new(0, 0, 0, 500)
-gamesInfo.BackgroundTransparency = 1
-gamesInfo.Text = "Original mini-games in the style of Block Blast, Stumble Guys and Steal a Brainrot. They run only on your client, so nobody else sees them. Your character is teleported during Obby and Loot Rush, and returns when you stop."
-gamesInfo.TextColor3 = COLOR_DIM
-gamesInfo.TextScaled = true
-gamesInfo.TextWrapped = true
-gamesInfo.Font = activeFont
-gamesInfo.ZIndex = 3
-gamesInfo.Parent = gamesPage
-
 player.CharacterAdded:Connect(function()
     stopGame(true)
 end)
