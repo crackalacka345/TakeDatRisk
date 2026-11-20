@@ -133,7 +133,7 @@ local function teardown()
 
     local playerGui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if playerGui then
-        for _, name in ipairs({ "MM2_Helper_GUI", "MM2Hub_Loading", "MM2Hub_ShootRing", "MM2Hub_StackGame" }) do
+        for _, name in ipairs({ "MM2_Helper_GUI", "MM2Hub_Notice", "MM2Hub_Loading", "MM2Hub_ShootRing", "MM2Hub_StackGame" }) do
             local g = playerGui:FindFirstChild(name)
             if g then g:Destroy() end
         end
