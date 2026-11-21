@@ -11,7 +11,7 @@ local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
-local BASE = getgenv().MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
+local BASE = getgenv().MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
 local FILES = { "bg_module.lua", "gif_module.lua", "MM2_Helper.lua" }
 local BACKUP_PREFIX = "MM2Hub_backup_"
 local PHASE_WAIT = 0.6
