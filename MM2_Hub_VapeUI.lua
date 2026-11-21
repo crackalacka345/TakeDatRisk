@@ -22,19 +22,45 @@ local function alive()
     return G.MM2HubVapeUIGen == GEN
 end
 
--- the UI library sits next to this file in the repo (same base url the loader sets)
+-- UI LIBRARY: the real Vape V4 UI (its "Independent" mode, loaded from VapeV4ForRoblox) through VapeV4_Adapter.lua.
+-- If Vape can't start (no file functions, no connection, ...), the built-in Vape-style library (VapeUI_Lib.lua) is used instead.
 local VapeUI
+local usingRealVape = false
 do
-    local base = G.MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
-    local okLib, libSrc = pcall(game.HttpGet, game, base .. "VapeUI_Lib.lua?cb=" .. tostring(os.time()))
-    if not okLib or type(libSrc) ~= "string" or #libSrc < 200 then
-        error("VapeUI: couldn't download VapeUI_Lib.lua", 0)
+    local base = G.MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
+    local function loadRepoFile(name)
+        local okGet, body = pcall(game.HttpGet, game, base .. name .. "?cb=" .. tostring(os.time()))
+        if not okGet or type(body) ~= "string" or #body < 200 then
+            return nil, "couldn't download " .. name
+        end
+        local fn, err = loadstring(body)
+        if not fn then return nil, name .. " has a syntax error: " .. tostring(err) end
+        return fn
     end
-    local libFn, libErr = loadstring(libSrc)
-    if not libFn then
-        error("VapeUI: VapeUI_Lib.lua has a syntax error: " .. tostring(libErr), 0)
+
+    local why = nil
+    local adapterFn, adapterErr = loadRepoFile("VapeV4_Adapter.lua")
+    if adapterFn then
+        local okA, lib, libErr = pcall(function()
+            return adapterFn().load()
+        end)
+        if okA and lib then
+            VapeUI = lib
+            usingRealVape = true
+        else
+            why = okA and libErr or lib
+        end
+    else
+        why = adapterErr
     end
-    VapeUI = libFn()
+
+    if not VapeUI then
+        warn("MM2 Hub: real Vape UI unavailable (" .. tostring(why) .. "), using the built-in Vape-style UI")
+        G.MM2HubNotice = "Vape V4 couldn't load (" .. tostring(why) .. "), using the built-in Vape-style UI"
+        local libFn, libErr = loadRepoFile("VapeUI_Lib.lua")
+        if not libFn then error("VapeUI: " .. tostring(libErr), 0) end
+        VapeUI = libFn()
+    end
 end
 
 local COLOR_RED = Color3.fromRGB(220, 30, 60)
@@ -163,7 +189,7 @@ local cfg = { aimMode = "REGULAR", shootRing = 110, shootAim = 100, reachSize = 
 -- State is on G.MM2HubVapeUIState: killed (set of Players), infection (bool), zombies() (function).
 -- Only ReplicatedStorage is scanned: walking the whole game on load causes the lag spike.
 -- ============================
-local RS = { killed = {}, infection = false }
+local RS = { killed = {}, infection = false, startFns = {}, endFns = {} }
 G.MM2HubVapeUIState = RS
 
 local function toPlayer(v)
@@ -192,6 +218,7 @@ local function hookLoading(remote)
             if RS.infection then
                 notify("Infection mode", "Everyone with a knife is a ZOMBIE")
             end
+            for _, f in ipairs(RS.startFns) do pcall(f) end
         end))
     end
 end
@@ -205,6 +232,17 @@ for _, d in ipairs(ReplicatedStorage:GetDescendants()) do
     scanRound(d)
 end
 track(ReplicatedStorage.DescendantAdded:Connect(scanRound))
+
+-- round end: Insight.RoundPlayed fires when a round finishes
+do
+    local insight = ReplicatedStorage:FindFirstChild("Insight")
+    local played = insight and insight:FindFirstChild("RoundPlayed")
+    if played and played:IsA("BindableEvent") then
+        track(played.Event:Connect(function()
+            for _, f in ipairs(RS.endFns) do pcall(f) end
+        end))
+    end
+end
 
 -- ZOMBIES (Infection): anyone holding a knife. Empty unless the map is Infection.
 RS.zombies = function()
@@ -1695,6 +1733,32 @@ do
         end,
     })
 
+    -- ========== ANTI FLING ==========
+    -- Lives in MM2_AntiFling.lua next to this file; loaded the first time it is switched on.
+    local antiFling = nil
+    characterTab:Toggle({
+        Title = "Anti Fling",
+        Callback = function(value)
+            if value and not antiFling then
+                local base = G.MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
+                local okLoad, mod = pcall(function()
+                    return loadstring(game:HttpGet(base .. "MM2_AntiFling.lua?cb=" .. tostring(os.time())))()
+                end)
+                if okLoad and type(mod) == "table" then
+                    antiFling = mod
+                else
+                    notify("Anti Fling", "Module failed to load: " .. tostring(mod))
+                    return
+                end
+            end
+            if antiFling then antiFling.setEnabled(value) end
+            notify("Anti Fling", value and "ON" or "OFF")
+        end,
+    })
+    onCleanup(function()
+        if antiFling then pcall(antiFling.destroy) end
+    end)
+
     -- ========== AUTO COIN ==========
     -- Tweens to each Coin_Server part inside a model named CoinContainer, nearest first.
     -- Waits for the CoinCollected remote before moving on (unless "Skip wait" is on).
@@ -1705,6 +1769,12 @@ do
     local coinRunning = false
     local coinSpeed = COIN_SPEED
     local skipWait = false
+    local killProtect = false   -- hide under the map when the murderer gets close
+    local coinHide = false      -- true while hidden
+    local hiddenRoot, hiddenFrom = nil, nil
+    local roundMode = false     -- run only from round start to round end
+    local roundActive = false
+    local HIDE_DEPTH, KILL_RANGE = 60, 35
     local coinSignal = Instance.new("BindableEvent")
     local activeCoinTween = nil
     local lastCoinNotice = nil
@@ -1754,7 +1824,7 @@ do
         activeCoinTween = tween
         tween:Play()
         local t = 0
-        while not done and coinOn and coin.Parent and t < duration + 1 and alive() do
+        while not done and coinOn and not coinHide and coin.Parent and t < duration + 1 and alive() do
             task.wait(0.05)
             t = t + 0.05
         end
@@ -1774,6 +1844,67 @@ do
             coinNotice("CoinCollected remote not found, using coin removal instead.")
         end
 
+        -- KILL PROTECTION: when the murderer (or a zombie) gets close, the character anchors
+        -- under the map until they leave. Coins are collected again once it is clear.
+        local function coinKillHide(root)
+            if coinHide and hiddenRoot ~= root then
+                coinHide = false -- the character respawned while hidden
+            end
+            if not killProtect then
+                if coinHide and hiddenRoot then
+                    pcall(function() hiddenRoot.Anchored = false; hiddenRoot.CFrame = hiddenFrom end)
+                    coinHide = false
+                end
+                return false
+            end
+            local refPos = (coinHide and hiddenFrom) and hiddenFrom.Position or root.Position
+            local m = findPlayerByTool("knife", true)
+            local mRoot = m and m.Character and m.Character:FindFirstChild("HumanoidRootPart")
+            local near = mRoot ~= nil and (mRoot.Position - refPos).Magnitude <= KILL_RANGE
+            if near and not coinHide then
+                coinHide = true
+                hiddenRoot = root
+                hiddenFrom = root.CFrame
+                root.Anchored = true
+                root.CFrame = CFrame.new(root.Position.X, root.Position.Y - HIDE_DEPTH, root.Position.Z)
+                coinNotice("Kill protection: hiding under the map")
+            elseif not near and coinHide then
+                coinHide = false
+                root.Anchored = false
+                root.CFrame = hiddenFrom
+                coinNotice("Kill protection: clear, back to coins")
+            end
+            return coinHide
+        end
+
+        -- while hidden: rise just above the nearest close coin so it touches the hitbox, then drop back
+        local function hideGrab(root)
+            if not hiddenFrom then return end
+            local nearest, best = nil, 25
+            for _, c in ipairs(getCoins()) do
+                if c.Parent then
+                    local d = (c.Position - hiddenFrom.Position).Magnitude
+                    if d < best then best, nearest = d, c end
+                end
+            end
+            if not nearest then return end
+            local fired = false
+            local conn = coinSignal.Event:Connect(function() fired = true end)
+            root.Anchored = false -- anchored parts don't fire Touched, so unanchor for the grab
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.CFrame = CFrame.new(nearest.Position + Vector3.new(0, 3, 0))
+            local t = 0
+            while not fired and t < 0.4 and nearest.Parent and coinOn do
+                task.wait(0.05)
+                t = t + 0.05
+            end
+            conn:Disconnect()
+            if coinHide and root.Parent then
+                root.Anchored = true
+                root.CFrame = CFrame.new(hiddenFrom.Position.X, hiddenFrom.Position.Y - HIDE_DEPTH, hiddenFrom.Position.Z)
+            end
+        end
+
         local skipped = {}
         while coinOn and alive() do
             local char = player.Character
@@ -1781,6 +1912,9 @@ do
             local hum = char and char:FindFirstChildOfClass("Humanoid")
             if not root or not hum or hum.Health <= 0 then
                 task.wait(0.5)
+            elseif coinKillHide(root) then
+                hideGrab(root)
+                task.wait(0.2)
             else
                 local coins = getCoins()
                 local candidates = {}
@@ -1829,11 +1963,19 @@ do
         if remoteConn then
             pcall(function() remoteConn:Disconnect() end)
         end
+        if coinHide and hiddenRoot then
+            pcall(function() hiddenRoot.Anchored = false; hiddenRoot.CFrame = hiddenFrom end)
+        end
+        coinHide = false
         coinRunning = false
     end
 
     onCleanup(function()
         coinOn = false
+        if coinHide and hiddenRoot then
+            pcall(function() hiddenRoot.Anchored = false; hiddenRoot.CFrame = hiddenFrom end)
+        end
+        coinHide = false
         if activeCoinTween then
             pcall(function() activeCoinTween:Cancel() end)
             activeCoinTween = nil
@@ -1841,20 +1983,20 @@ do
         pcall(function() coinSignal:Destroy() end)
     end)
 
+    local function setCoinRunning(on)
+        coinOn = on
+        if on and not coinRunning then
+            coinRunning = true
+            task.spawn(autoCoinLoop)
+        end
+    end
+
     coinTab:Toggle({
         Title = "Auto Coin",
         Callback = function(value)
             if value == coinOn then return end
-            coinOn = value
-            if coinOn then
-                notify("Auto Coin", "ON")
-                if not coinRunning then
-                    coinRunning = true
-                    task.spawn(autoCoinLoop)
-                end
-            else
-                notify("Auto Coin", "OFF")
-            end
+            setCoinRunning(value)
+            notify("Auto Coin", value and "ON" or "OFF")
         end,
     })
     coinTab:Slider({
@@ -1869,6 +2011,42 @@ do
         Title = "Skip wait for CoinCollected",
         Callback = function(value)
             skipWait = value == true
+        end,
+    })
+    coinTab:Toggle({
+        Title = "Kill protect (hide under map)",
+        Callback = function(value)
+            killProtect = value == true
+            notify("Kill protect", killProtect and "ON: you hide when the murderer is close" or "OFF")
+        end,
+    })
+
+    -- EACH ROUND: Auto Coin starts when a round starts and stops when it ends
+    local roundState = G.MM2HubVapeUIState
+    if roundState and roundState.startFns then
+        table.insert(roundState.startFns, function()
+            roundActive = true
+            if roundMode then setCoinRunning(true) end
+        end)
+        table.insert(roundState.endFns, function()
+            roundActive = false
+            if roundMode and coinOn then
+                setCoinRunning(false)
+                notify("Auto Coin", "Round ended, stopped")
+            end
+        end)
+    end
+    coinTab:Toggle({
+        Title = "Each round (auto start / stop)",
+        Callback = function(value)
+            roundMode = value == true
+            if roundMode then
+                if roundActive then setCoinRunning(true) end
+                notify("Auto Coin", "Runs each round")
+            else
+                setCoinRunning(false)
+                notify("Auto Coin", "Each round OFF")
+            end
         end,
     })
 
@@ -3522,4 +3700,7 @@ do
     end
 end
 
-notify("vv:2", "VapeUI loaded. Press " .. tostring(G.MM2HubUI and G.MM2HubUI.toggleKey and G.MM2HubUI.toggleKey() or "RightShift") .. " to hide / show")
+-- everything is built: let the UI finish (the real Vape loads its saved settings here)
+if Window.Init then Window:Init() end
+
+notify("vv:2", (usingRealVape and "Vape V4 UI loaded. " or "VapeUI loaded. ") .. "Press " .. tostring(G.MM2HubUI and G.MM2HubUI.toggleKey and G.MM2HubUI.toggleKey() or "RightShift") .. " to open / hide it")
