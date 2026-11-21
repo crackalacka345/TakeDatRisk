@@ -346,7 +346,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -90, 1, 0)
 title.Position = UDim2.new(0, 30, 0, 0)
 title.BackgroundTransparency = 1
-title.Text = "zzz's mm2 hub"
+title.Text = "vv:2"
 title.TextColor3 = COLOR_TEXT
 title.TextScaled = true
 title.Font = activeFont
@@ -3539,6 +3539,9 @@ setTab("ESP")
 -- loading screen: reveal the window once everything is built
 if loadingFinish then
     loadingFinish(function()
+        -- SAVE UI's: if the last run ended on WindUI / VapeUI, that UI opens instead of this one
+        local ui = getgenv().MM2HubUI
+        if ui and ui.autoLaunch() then return end
         rgbBorder.Visible = true
         getgenv().MM2HubShown = true
     end)
@@ -3597,29 +3600,166 @@ end)()
     end)
 end)()
 
--- UI TAB: switches the whole hub to the WindUI version (MM2_Hub_WindUI.lua in the repo)
+-- UI SWITCHER: WindUI / VapeUI versions of the hub, and SAVE UI's (remembers the pick between runs).
+-- Exposed as getgenv().MM2HubUI, so the WindUI and VapeUI hubs can switch, save and reset too.
+-- (one block, no new top-level locals)
 do
-    local uiPage = pages.UI
-    local windBtn = makeButton(uiPage, "🪟 WINDUI HUB", 0, Color3.fromRGB(120, 200, 255))
-    getgenv().MM2HubClick(windBtn, "MouseButton1Click", function()
-        local base = getgenv().MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
-        setStatus("Loading WindUI hub...", COLOR_BLUE)
-        local okSrc, src = pcall(game.HttpGet, game, base .. "MM2_Hub_WindUI.lua?cb=" .. tostring(os.time()))
+    local G = getgenv()
+    local UI_FILES = {
+        WIND = { file = "MM2_Hub_WindUI.lua", name = "WindUI" },
+        VAPE = { file = "MM2_Hub_VapeUI.lua", name = "VapeUI" },
+    }
+    G.MM2HubUICurrent = "MAIN"
+    local api = {}
+
+    function api.current() return G.MM2HubUICurrent or "MAIN" end
+    function api.saveOn() return settings.saveUI == true end
+    function api.toggleKey() return settings.toggleKey or "RightShift" end
+
+    -- downloads and compiles a UI file; returns the function, or nil and a message
+    local function prepare(key)
+        local info = UI_FILES[key]
+        local base = G.MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
+        local okSrc, src = pcall(game.HttpGet, game, base .. info.file .. "?cb=" .. tostring(os.time()))
         if not okSrc or type(src) ~= "string" or #src < 200 then
-            setStatus("Couldn't download the WindUI hub", COLOR_RED)
-            return
+            return nil, "Couldn't download the " .. info.name .. " hub"
         end
         local fn, err = loadstring(src)
         if not fn then
-            setStatus("WindUI hub has a syntax error", COLOR_RED)
-            warn(tostring(err))
-            return
+            warn(info.name .. " hub syntax error: " .. tostring(err))
+            return nil, info.name .. " hub has a syntax error"
         end
-        if getgenv().MM2HubTeardown then getgenv().MM2HubTeardown() end
+        return fn
+    end
+
+    -- puts the original hub back; the updater reloads it from the files already in memory
+    local function openMain()
+        if not G.MM2HubRestart then return false, "Going back needs loader.lua" end
+        local ok, msg = G.MM2HubRestart()
+        if not ok then return false, tostring(msg) end
+        return true, "Original UI loaded"
+    end
+
+    -- key = "MAIN", "WIND" or "VAPE". silent = don't remember it (used by the auto launch).
+    -- Returns ok, message. With SAVE UI's on, the pick is saved so the next run opens it.
+    function api.switch(key, silent)
+        if key ~= "MAIN" and not UI_FILES[key] then return false, "Unknown UI" end
+        if key == api.current() then return true, "Already on that UI" end
+        local fn
+        if key ~= "MAIN" then
+            local err
+            fn, err = prepare(key)
+            if not fn then return false, err end
+        end
+        if settings.saveUI and not silent then
+            settings.savedUI = key
+            saveSettings()
+        end
+        local previous = api.current()
+        G.MM2HubUICurrent = key
         task.spawn(function()
+            if key == "MAIN" then
+                local ok, msg = openMain()
+                if not ok then
+                    G.MM2HubUICurrent = previous
+                    warn("MM2 Hub: couldn't go back to the original UI: " .. tostring(msg))
+                end
+                return
+            end
+            if G.MM2HubTeardown then G.MM2HubTeardown() end
+            if G.MM2HubWindUIClose then pcall(G.MM2HubWindUIClose) end
+            if G.MM2HubVapeUIClose then pcall(G.MM2HubVapeUIClose) end
             local ok, e = pcall(fn)
-            if not ok then warn("WindUI hub error: " .. tostring(e)) end
+            if not ok then
+                -- the new UI crashed while starting: bring the original one back (and don't auto launch it again this run)
+                warn(UI_FILES[key].name .. " hub error: " .. tostring(e))
+                G.MM2HubUICurrent = "MAIN"
+                G.MM2HubSkipAutoUI = true
+                G.MM2HubNotice = UI_FILES[key].name .. " failed to start, restored the original UI"
+                if G.MM2HubRestart then pcall(G.MM2HubRestart) end
+            end
         end)
+        return true, "Switching..."
+    end
+
+    -- SAVE UI's: on = the UI you switch to is remembered and opens next run
+    function api.setSave(on)
+        settings.saveUI = on and true or false
+        settings.savedUI = on and api.current() or nil
+        saveSettings()
+    end
+
+    -- RESET: forget the saved UI and go back to the original one
+    function api.reset()
+        settings.savedUI = nil
+        saveSettings()
+        if api.current() ~= "MAIN" then
+            local ok, msg = api.switch("MAIN", true)
+            if ok then return true, "Back to the original UI" end
+            return false, msg
+        end
+        return true, "Saved UI cleared"
+    end
+
+    -- called once the hub has loaded: opens the saved UI instead of the original one. true = it did.
+    function api.autoLaunch()
+        if G.MM2HubSkipAutoUI then
+            G.MM2HubSkipAutoUI = nil
+            return false
+        end
+        local want = settings.saveUI and settings.savedUI
+        if not want or not UI_FILES[want] then return false end
+        local ok, msg = api.switch(want, true)
+        if not ok then
+            G.MM2HubNotice = tostring(msg)
+            return false
+        end
+        return true
+    end
+
+    G.MM2HubUI = api
+
+    -- UI TAB buttons
+    local windBtn = makeButton(pages.UI, "🪟 WINDUI HUB", 0, Color3.fromRGB(120, 200, 255))
+    getgenv().MM2HubClick(windBtn, "MouseButton1Click", function()
+        setStatus("Loading WindUI hub...", COLOR_BLUE)
+        local ok, msg = api.switch("WIND")
+        if not ok then setStatus(msg, COLOR_RED) end
+    end)
+
+    local vapeBtn = makeButton(pages.UI, "💨 VapeUI", 54, Color3.fromRGB(40, 220, 170))
+    getgenv().MM2HubClick(vapeBtn, "MouseButton1Click", function()
+        setStatus("Loading VapeUI hub...", COLOR_BLUE)
+        local ok, msg = api.switch("VAPE")
+        if not ok then setStatus(msg, COLOR_RED) end
+    end)
+end
+
+-- SETTINGS: SAVE UI's (toggle) and RESET, side by side
+do
+    local api = getgenv().MM2HubUI
+    local saveBtn, saveStroke = makeButton(settingsPage, "💾 SAVE UI's: OFF", 806, COLOR_GREEN)
+    local resetBtn = makeButton(settingsPage, "↺ RESET", 806, COLOR_RED)
+    saveBtn.Parent.Size = UDim2.new(0.62, -4, 0, 44)
+    resetBtn.Parent.Size = UDim2.new(0.38, -4, 0, 44)
+    resetBtn.Parent.Position = UDim2.new(0.62, 4, 0, 806)
+
+    local function refreshSave()
+        local on = api.saveOn()
+        saveBtn.Text = on and "💾 SAVE UI's: ON" or "💾 SAVE UI's: OFF"
+        setToggleVisual(saveStroke, on)
+    end
+    refreshSave()
+
+    getgenv().MM2HubClick(saveBtn, "MouseButton1Click", function()
+        api.setSave(not api.saveOn())
+        refreshSave()
+        setStatus(api.saveOn() and "SAVE UI's on: the UI you switch to opens next run" or "SAVE UI's off", COLOR_GREEN)
+    end)
+    getgenv().MM2HubClick(resetBtn, "MouseButton1Click", function()
+        local _, msg = api.reset()
+        refreshSave()
+        setStatus(tostring(msg), COLOR_GOLD)
     end)
 end
 
