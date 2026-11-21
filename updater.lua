@@ -126,6 +126,7 @@ end
 local function teardown()
     local G = getgenv()
     if G.MM2HubWindUIClose then pcall(G.MM2HubWindUIClose) end -- closes the WindUI hub if it's open
+    if G.MM2HubVapeUIClose then pcall(G.MM2HubVapeUIClose) end -- closes the VapeUI hub if it's open
     G.MM2HubGen = (G.MM2HubGen or 0) + 1 -- every loop from the running copy sees this and stops
     if G.MM2HubBg then pcall(function() G.MM2HubBg.stop() end) end
     if G.MM2HubGif then pcall(function() G.MM2HubGif.stop() end) end
@@ -575,6 +576,28 @@ function U.switch(input)
     return false, "v" .. ver .. " failed to start"
 end
 getgenv().MM2HubSwitch = U.switch
+
+-- RESTART: brings the original hub back from the files already in memory (no GitHub unless nothing is cached).
+-- Used by the UI switcher (UI tab / RESET) to leave WindUI or VapeUI. Returns ok, message.
+function U.restart()
+    local bundle = getgenv().MM2HubSrc or backupBundle()
+    if not bundle then
+        local okF, fetched = pcall(fetchAll)
+        if okF then bundle = fetched end
+    end
+    if not bundle then
+        return false, "Couldn't restart the original UI (no files)"
+    end
+    getgenv().MM2HubBoot = nil
+    teardown()
+    local ok, e = pcall(runAll, bundle)
+    if not ok then
+        warn("MM2 Hub: restart failed: " .. tostring(e))
+        return false, "The original UI failed to start"
+    end
+    return true, "Original UI loaded"
+end
+getgenv().MM2HubRestart = U.restart
 
 -- first run
 local boot = makeBoot()
