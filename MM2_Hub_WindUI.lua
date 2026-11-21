@@ -108,6 +108,22 @@ local Window = WindUI:CreateWindow({
     },
 })
 
+-- CLEANUP: stops every feature and restores the character.
+-- Also run by the main hub when it refreshes or switches versions (MM2HubWindUIClose).
+local function cleanup()
+    G.MM2HubWindUIGen = (G.MM2HubWindUIGen or 0) + 1
+    for i = #cleanups, 1, -1 do
+        pcall(cleanups[i])
+    end
+    cleanups = {}
+end
+
+G.MM2HubWindUIClose = function()
+    cleanup()
+    pcall(function() Window:Destroy() end)
+    G.MM2HubWindUIClose = nil
+end
+
 -- PART 1: ROUND WATCH, ESP, COMBAT (aim, shoot, murd win, reach, sheriff hitbox, grab gun)
 do
 local camera = workspace.CurrentCamera
@@ -3471,22 +3487,42 @@ do
             if G.MM2HubWindUIClose then G.MM2HubWindUIClose() end
         end,
     })
-end
 
--- CLEANUP: stops every feature and restores the character.
--- Also run by the main hub when it refreshes or switches versions (MM2HubWindUIClose).
-local function cleanup()
-    G.MM2HubWindUIGen = (G.MM2HubWindUIGen or 0) + 1
-    for i = #cleanups, 1, -1 do
-        pcall(cleanups[i])
+    -- UI: SAVE UI's remembers the UI for the next run, RESET goes back to the original UI.
+    local uiTab = settingsSection:Tab({ Title = "UI", Icon = "solar:bell-bold" })
+    local uiApi = G.MM2HubUI
+    if uiApi then
+        uiTab:Toggle({
+            Title = "SAVE UI's",
+            Value = uiApi.saveOn(),
+            Callback = function(value)
+                if value == uiApi.saveOn() then return end
+                uiApi.setSave(value)
+                notify("SAVE UI's", value and "ON: this UI opens next time you run it" or "OFF")
+            end,
+        })
+        uiTab:Button({
+            Title = "RESET (back to the original UI)",
+            Callback = function()
+                local _, msg = uiApi.reset()
+                notify("RESET", tostring(msg))
+            end,
+        })
+        uiTab:Button({
+            Title = "Switch to the original UI",
+            Callback = function()
+                local ok, msg = uiApi.switch("MAIN")
+                if not ok then notify("Switch UI", tostring(msg)) end
+            end,
+        })
+        uiTab:Button({
+            Title = "Switch to VapeUI",
+            Callback = function()
+                local ok, msg = uiApi.switch("VAPE")
+                if not ok then notify("Switch UI", tostring(msg)) end
+            end,
+        })
     end
-    cleanups = {}
-end
-
-G.MM2HubWindUIClose = function()
-    cleanup()
-    pcall(function() Window:Destroy() end)
-    G.MM2HubWindUIClose = nil
 end
 
 notify("MM2 Hub", "WindUI hub loaded")
