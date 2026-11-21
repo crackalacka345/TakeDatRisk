@@ -2,6 +2,14 @@
 -- Newest entry first. Add a new { title = "...", changes = { ... } } block at the TOP for each update.
 return {
     {
+        title = "2026-11-21: New UI styles",
+        changes = {
+            "Added SETTINGS > UI STYLE: Classic / Glass / Sidebar",
+            "Glass: translucent panels, soft gradient, pill tabs",
+            "Sidebar: left icon rail with hover labels instead of the tab row",
+        },
+    },
+    {
         title = "2026-11-21: Modules update",
         changes = {
             "Added MODULES tab: import .module files from a GitHub repo into any category",
