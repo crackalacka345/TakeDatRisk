@@ -25,9 +25,9 @@ VapeUI.__index = VapeUI
 local GUI_NAME = "MM2Hub_VapeUI"
 local FONT = Enum.Font.Arial
 local FONT_BOLD = Enum.Font.ArialBold
-local PANEL_W = 236
+local PANEL_W = 272
 local PANEL_GAP = 12
-local ROW_H = 34
+local ROW_H = 38
 
 local C = {
     Panel = Color3.fromRGB(26, 25, 26),
@@ -139,7 +139,7 @@ function VapeUI:CreateWindow(opts)
     local cam = workspace.CurrentCamera
     local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
     local isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-    local scaleValue = math.clamp(math.min(vp.Y / 640, vp.X / 900), 0.7, 1)
+    local scaleValue = math.clamp(math.min(vp.Y / 640, vp.X / 900), 0.7, 1.2)
     if isTouch then scaleValue = math.min(scaleValue, 0.85) end
 
     -- the panels live in `root` (hidden with the toggle key); the HUD (watermark, ArrayList, notifications) stays visible
@@ -257,7 +257,12 @@ function VapeUI:CreateWindow(opts)
     function Window:SetVisible(on)
         self._visible = on and true or false
         root.Visible = self._visible
+        mark.Visible = self._visible
+        arrayHost.Visible = self._visible
     end
+
+    -- the real Vape finishes its setup here; nothing to do for the built-in UI
+    function Window:Init() end
 
     function Window:Toggle()
         self:SetVisible(not self._visible)
@@ -317,7 +322,7 @@ function VapeUI:CreateWindow(opts)
 
         local panel = new("Frame", {
             Name = "Panel_" .. title,
-            Position = UDim2.fromOffset(16 + col * (PANEL_W + PANEL_GAP), 56 + row * 262),
+            Position = UDim2.fromOffset(16 + col * (PANEL_W + PANEL_GAP), 56 + row * 290),
             Size = UDim2.fromOffset(PANEL_W, 0),
             AutomaticSize = Enum.AutomaticSize.Y,
             BackgroundColor3 = C.Panel,
@@ -346,7 +351,7 @@ function VapeUI:CreateWindow(opts)
             Text = title,
             TextColor3 = C.Text,
             Font = FONT_BOLD,
-            TextSize = 16,
+            TextSize = 18,
             TextXAlignment = Enum.TextXAlignment.Left,
         }, header)
         local arrow = new("TextLabel", {
@@ -457,7 +462,7 @@ function VapeUI:CreateWindow(opts)
                 Text = tostring(tcfg.Title or "Module"),
                 TextColor3 = C.Dim,
                 Font = FONT,
-                TextSize = 15,
+                TextSize = 17,
                 TextXAlignment = Enum.TextXAlignment.Left,
             }, head)
             local chev = new("TextLabel", {
@@ -532,7 +537,7 @@ function VapeUI:CreateWindow(opts)
                     Text = text,
                     TextColor3 = state and C.Text or C.Dim,
                     Font = FONT,
-                    TextSize = 14,
+                    TextSize = 15,
                     TextWrapped = true,
                     TextXAlignment = Enum.TextXAlignment.Left,
                 }, row)
@@ -611,7 +616,7 @@ function VapeUI:CreateWindow(opts)
                     Text = text,
                     TextColor3 = C.Text,
                     Font = FONT,
-                    TextSize = 14,
+                    TextSize = 15,
                     TextWrapped = true,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     LayoutOrder = optOrder,
@@ -666,7 +671,7 @@ function VapeUI:CreateWindow(opts)
                     Text = text,
                     TextColor3 = C.Dim,
                     Font = FONT,
-                    TextSize = 14,
+                    TextSize = 15,
                     TextWrapped = true,
                     TextXAlignment = Enum.TextXAlignment.Left,
                 }, top)
@@ -678,7 +683,7 @@ function VapeUI:CreateWindow(opts)
                     Text = fmtNumber(value, step),
                     TextColor3 = C.Text,
                     Font = FONT_BOLD,
-                    TextSize = 14,
+                    TextSize = 15,
                     TextXAlignment = Enum.TextXAlignment.Right,
                 }, top)
 
