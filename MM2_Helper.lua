@@ -1,4 +1,4 @@
--- MM2 Helper v3.19 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.20 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -358,7 +358,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.19"
+versionBadge.Text = "v3.20"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -3747,7 +3747,7 @@ getgenv().MM2HubBind(RunService.Heartbeat, function(dt)
 end)
 
 -- ============================
--- MODULES: the tabs and the controlled loader live in MM2_ModuleLoader.lua / MM2_ModulesTab.lua
+-- MODULES: only the controlled loader + scanner live in MM2_ModuleLoader.lua (the tabs themselves are below)
 -- ============================
 do
     local base = getgenv().MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
@@ -3759,17 +3759,988 @@ do
         COLOR_RED = COLOR_RED, COLOR_DIM = COLOR_DIM, COLOR_GOLD = COLOR_GOLD,
         COLOR_TEXT = COLOR_TEXT, COLOR_GREEN = COLOR_GREEN,
     }
-    for _, file in ipairs({ "MM2_ModuleLoader.lua", "MM2_ModulesTab.lua" }) do
+    for _, file in ipairs({ "MM2_ModuleLoader.lua" }) do
         local ok, err = pcall(function()
             loadstring(game:HttpGet(base .. file .. "?cb=" .. tostring(os.time())))()(deps)
         end)
         if not ok then
             warn("MM2 Hub: " .. file .. " failed: " .. tostring(err))
             setStatus(file .. " failed to load: " .. tostring(err):sub(1, 80), COLOR_RED)
-            break -- the tab needs the loader, so stop here
         end
     end
 end
+
+-- ============================
+-- MODULES TAB: add modules from a GitHub repo
+--   paste github.com/user/repo -> every *.module / *.module.lua file in it is listed,
+--   pick one, pick a category, press ADD MODULE
+-- ============================
+-- (wrapped in a function so its locals do not count toward the main chunk's 200 local limit)
+;(function()
+    local page = pages.MODULES
+    local BG = Color3.fromRGB(24, 24, 36)
+    local PANEL = Color3.fromRGB(18, 18, 28)
+    local ACCENT = THEMES.DEFAULT.accent
+    local LIST_H = 170
+
+    local function pretty(name)
+        if name == "ESP" or name == "UI" then return name end
+        return name:sub(1, 1) .. name:sub(2):lower()
+    end
+
+    -- textbox
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, 0, 0, 32)
+    box.BackgroundColor3 = BG
+    box.BorderSizePixel = 0
+    box.PlaceholderText = "github.com/gituser/reponame"
+    box.PlaceholderColor3 = Color3.fromRGB(90, 90, 120)
+    box.Text = ""
+    box.TextColor3 = COLOR_TEXT
+    box.TextSize = 14
+    box.Font = activeFont
+    box.ClearTextOnFocus = false
+    box.TextXAlignment = Enum.TextXAlignment.Left
+    box.ZIndex = 4
+    box.Parent = page
+    corner(box, 8)
+    local boxPad = Instance.new("UIPadding")
+    boxPad.PaddingLeft = UDim.new(0, 10)
+    boxPad.PaddingRight = UDim.new(0, 10)
+    boxPad.Parent = box
+    local boxStroke = Instance.new("UIStroke")
+    boxStroke.Color = ACCENT
+    boxStroke.Thickness = 1.2
+    boxStroke.Transparency = 0.6
+    boxStroke.Parent = box
+
+    local info = Instance.new("TextLabel")
+    info.Position = UDim2.fromOffset(2, 36)
+    info.Size = UDim2.new(1, -4, 0, 16)
+    info.BackgroundTransparency = 1
+    info.Text = "Paste a GitHub repo link"
+    info.TextColor3 = COLOR_DIM
+    info.TextSize = 12
+    info.Font = activeFont
+    info.TextXAlignment = Enum.TextXAlignment.Left
+    info.TextTruncate = Enum.TextTruncate.AtEnd
+    info.ZIndex = 4
+    info.Parent = page
+
+    local function mkButton(text, pos, size, color)
+        local b = Instance.new("TextButton")
+        b.Position = pos
+        b.Size = size
+        b.BackgroundColor3 = color
+        b.BorderSizePixel = 0
+        b.AutoButtonColor = false
+        b.Text = text
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.TextSize = 14
+        b.Font = activeFont
+        b.ZIndex = 4
+        b.Parent = page
+        corner(b, 8)
+        return b
+    end
+
+    local addBtn = mkButton("ADD MODULE", UDim2.fromOffset(0, 56), UDim2.new(0.6, -4, 0, 34), ACCENT)
+    addBtn.Text = "ADD"
+    addBtn.Size = UDim2.new(0.3, -4, 0, 34)
+    local checkBtn = mkButton("CHECK CODE", UDim2.new(0.3, 0, 0, 56), UDim2.new(0.3, -4, 0, 34), Color3.fromRGB(190, 140, 40))
+    checkBtn.TextSize = 12
+    addBtn.Visible = false -- ADD + CHECK CODE are shown once a .module file is selected
+    checkBtn.Visible = false
+    local catBtn = mkButton("CATEGORY ▾", UDim2.new(0.6, 0, 0, 56), UDim2.new(0.4, 0, 0, 34), BG)
+
+    -- state
+    local files = {}           -- detected module files of the current repo
+    local pending = nil        -- the selected file, ready to add
+    local category = nil
+    local listOpen = false
+    local lastRepoKey = nil
+    local searchGen = 0
+
+    -- selected-file bar + file list (same spot; one is open at a time)
+    local selectedBar = Instance.new("TextButton")
+    selectedBar.Position = UDim2.fromOffset(0, 98)
+    selectedBar.Size = UDim2.new(1, 0, 0, 34)
+    selectedBar.BackgroundColor3 = PANEL
+    selectedBar.BorderSizePixel = 0
+    selectedBar.AutoButtonColor = false
+    selectedBar.Text = ""
+    selectedBar.TextColor3 = COLOR_GREEN
+    selectedBar.TextSize = 13
+    selectedBar.Font = activeFont
+    selectedBar.TextXAlignment = Enum.TextXAlignment.Left
+    selectedBar.TextTruncate = Enum.TextTruncate.AtEnd
+    selectedBar.Visible = false
+    selectedBar.ZIndex = 5
+    selectedBar.Parent = page
+    corner(selectedBar, 8)
+    local selPad = Instance.new("UIPadding")
+    selPad.PaddingLeft = UDim.new(0, 10)
+    selPad.PaddingRight = UDim.new(0, 10)
+    selPad.Parent = selectedBar
+
+    local list = Instance.new("ScrollingFrame")
+    list.Position = UDim2.fromOffset(0, 98)
+    list.Size = UDim2.new(1, 0, 0, 0)
+    list.BackgroundColor3 = PANEL
+    list.BorderSizePixel = 0
+    list.ScrollBarThickness = 3
+    list.ScrollBarImageColor3 = ACCENT
+    list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    list.CanvasSize = UDim2.new()
+    list.ClipsDescendants = true
+    list.Visible = false
+    list.ZIndex = 5
+    list.Parent = page
+    corner(list, 8)
+    local listPad = Instance.new("UIPadding")
+    listPad.PaddingTop = UDim.new(0, 6)
+    listPad.PaddingBottom = UDim.new(0, 6)
+    listPad.PaddingLeft = UDim.new(0, 6)
+    listPad.PaddingRight = UDim.new(0, 8)
+    listPad.Parent = list
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Padding = UDim.new(0, 4)
+    listLayout.Parent = list
+
+    local function setList(open)
+        listOpen = open
+        if open then
+            selectedBar.Visible = false
+            list.Visible = true
+            TweenService:Create(list, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { Size = UDim2.new(1, 0, 0, LIST_H) }):Play()
+        else
+            TweenService:Create(list, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { Size = UDim2.new(1, 0, 0, 0) }):Play()
+            task.delay(0.22, function()
+                if not listOpen then
+                    list.Visible = false
+                    selectedBar.Visible = pending ~= nil
+                end
+            end)
+        end
+    end
+
+    local function setInfo(text, color)
+        info.Text = text
+        info.TextColor3 = color or COLOR_DIM
+    end
+
+    local function fileName(path)
+        return path:match("([^/]+)$") or path
+    end
+
+    local function selectFile(file)
+        pending = file
+        addBtn.Visible = true
+        checkBtn.Visible = true
+        selectedBar.Text = "✔ " .. file.path
+        setInfo("Ready: " .. fileName(file.path) .. (category and (" → " .. pretty(category)) or " (pick a category)"), COLOR_GREEN)
+        setList(false) -- selecting closes the list
+    end
+
+    local function fillList()
+        for _, c in ipairs(list:GetChildren()) do
+            if c:IsA("TextButton") then c:Destroy() end
+        end
+        for i, file in ipairs(files) do
+            local row = Instance.new("TextButton")
+            row.LayoutOrder = i
+            row.Size = UDim2.new(1, 0, 0, 30)
+            row.BackgroundColor3 = BG
+            row.BorderSizePixel = 0
+            row.AutoButtonColor = false
+            row.Text = file.path
+            row.TextColor3 = COLOR_TEXT
+            row.TextSize = 13
+            row.Font = activeFont
+            row.TextXAlignment = Enum.TextXAlignment.Left
+            row.TextTruncate = Enum.TextTruncate.AtEnd
+            row.ZIndex = 6
+            row.Parent = list
+            corner(row, 6)
+            local pad = Instance.new("UIPadding")
+            pad.PaddingLeft = UDim.new(0, 8)
+            pad.PaddingRight = UDim.new(0, 8)
+            pad.Parent = row
+            row.MouseEnter:Connect(function()
+                TweenService:Create(row, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(40, 40, 62) }):Play()
+            end)
+            row.MouseLeave:Connect(function()
+                TweenService:Create(row, TweenInfo.new(0.1), { BackgroundColor3 = BG }):Play()
+            end)
+            getgenv().MM2HubClick(row, "MouseButton1Click", function()
+                selectFile(file)
+            end)
+        end
+    end
+
+    getgenv().MM2HubClick(selectedBar, "MouseButton1Click", function()
+        if #files > 0 then setList(true) end -- tap the selection to pick a different file
+    end)
+
+    -- link parsing: github.com/user/repo, https://github.com/user/repo.git, .../tree/branch, user/repo
+    local function parseRepo(text)
+        text = (text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if text == "" then return nil end
+        local t = text:gsub("^https?://", ""):gsub("^www%.", "")
+        local rest = t:match("^github%.com/(.+)$")
+        if not rest and t:match("^[%w%-_%.]+/[%w%-_%.]+$") then rest = t end
+        if not rest then return nil end
+        local user, repo, tail = rest:match("^([%w%-_%.]+)/([%w%-_%.]+)(.*)$")
+        if not user then return nil end
+        repo = repo:gsub("%.git$", "")
+        if repo == "" then return nil end
+        local branch = tail and (tail:match("^/tree/(.+)$") or tail:match("^/blob/(.+)$"))
+        if branch then branch = branch:gsub("/+$", "") end
+        return user, repo, branch
+    end
+
+    local function isModuleFile(path)
+        local lower = path:lower()
+        return lower:match("%.module$") ~= nil
+            or lower:match("%.module%.lua$") ~= nil
+            or lower:match("%.module%.luau$") ~= nil
+    end
+
+    local function apiGet(url)
+        local ok, body = pcall(game.HttpGet, game, url)
+        if not ok or type(body) ~= "string" then return nil, "Couldn't reach GitHub (rate limit?)" end
+        local okJ, data = pcall(function() return HttpService:JSONDecode(body) end)
+        if not okJ or type(data) ~= "table" then return nil, "GitHub sent something unreadable" end
+        return data
+    end
+
+    -- branchPath: nil (default branch) or "branch" / "branch/sub/folder" from a /tree/ link.
+    -- Branch names can contain "/", so the longest prefix that is a real branch wins;
+    -- whatever is left over is a folder inside the repo (only modules in it are listed).
+    local function fetchModules(user, repo, branchPath)
+        local base = "https://api.github.com/repos/" .. user .. "/" .. repo
+        local branch, folder, tree, err
+        if not branchPath then
+            local data, e = apiGet(base)
+            if not data then return nil, e end
+            if not data.default_branch then return nil, "Repo not found" end
+            branch = data.default_branch
+            tree, err = apiGet(base .. "/git/trees/" .. branch .. "?recursive=1")
+        else
+            local segs = {}
+            for seg in branchPath:gmatch("[^/]+") do table.insert(segs, seg) end
+            for k = #segs, 1, -1 do
+                local try = table.concat(segs, "/", 1, k)
+                local t, e = apiGet(base .. "/git/trees/" .. try:gsub("[^%w%-_%./]", function(c)
+                    return string.format("%%%02X", c:byte())
+                end) .. "?recursive=1")
+                if t and type(t.tree) == "table" then
+                    branch, tree = try, t
+                    if k < #segs then folder = table.concat(segs, "/", k + 1) end
+                    break
+                end
+                err = e
+            end
+        end
+        if not tree then return nil, err or "Repo or branch not found" end
+        if type(tree.tree) ~= "table" then return nil, "Repo or branch not found" end
+        local found = {}
+        for _, item in ipairs(tree.tree) do
+            if item.type == "blob" and type(item.path) == "string" and isModuleFile(item.path)
+                and (not folder or item.path:sub(1, #folder + 1) == folder .. "/") then
+                local encoded = item.path:gsub("[^%w%-_%./]", function(c)
+                    return string.format("%%%02X", c:byte())
+                end)
+                local encBranch = branch:gsub("[^%w%-_%./]", function(c)
+                    return string.format("%%%02X", c:byte())
+                end)
+                table.insert(found, {
+                    user = user, repo = repo, branch = branch, path = item.path,
+                    url = "https://raw.githubusercontent.com/" .. user .. "/" .. repo .. "/" .. encBranch .. "/" .. encoded,
+                })
+            end
+        end
+        table.sort(found, function(x, y) return x.path:lower() < y.path:lower() end)
+        return found
+    end
+
+    local function search(force)
+        local user, repo, branch = parseRepo(box.Text)
+        if not user then
+            if box.Text:gsub("%s", "") ~= "" and force then
+                setInfo("Use a link like github.com/user/repo", COLOR_RED)
+            end
+            return
+        end
+        local key = (user .. "/" .. repo .. "@" .. tostring(branch)):lower()
+        if key == lastRepoKey and not force then return end
+        lastRepoKey = key
+        searchGen = searchGen + 1
+        local gen = searchGen
+        pending = nil
+        addBtn.Visible = false
+        checkBtn.Visible = false
+        selectedBar.Visible = false
+        setInfo("Fetching " .. user .. "/" .. repo .. "...", COLOR_GOLD)
+        task.spawn(function()
+            local found, err = fetchModules(user, repo, branch)
+            if gen ~= searchGen then return end -- the link changed while we were fetching
+            if not found then
+                files = {}
+                lastRepoKey = nil
+                fillList()
+                setList(false)
+                setInfo(err or "Couldn't read that repo", COLOR_RED)
+                return
+            end
+            files = found
+            fillList()
+            if #found == 0 then
+                setList(false)
+                setInfo("No .module files found in " .. user .. "/" .. repo, COLOR_RED)
+            else
+                setInfo("Found " .. #found .. " module file" .. (#found == 1 and "" or "s") .. ": pick one", COLOR_GREEN)
+                setList(true)
+            end
+        end)
+    end
+
+    -- retrieves automatically shortly after typing/pasting stops (or instantly on Enter / leaving the box)
+    box:GetPropertyChangedSignal("Text"):Connect(function()
+        local gen = searchGen
+        local snapshot = box.Text
+        task.delay(0.8, function()
+            if box.Text == snapshot and searchGen == gen then search(false) end
+        end)
+    end)
+    box.FocusLost:Connect(function()
+        search(true)
+    end)
+
+    -- category dropdown: slides down under the CATEGORY button
+    local cats = {}
+    for _, name in ipairs(TAB_NAMES) do
+        if name ~= "MODULES" and name ~= "MY MODULES" then table.insert(cats, name) end
+    end
+    local ROW_H = 28
+    local DROP_H = #cats * ROW_H + 8
+
+    local drop = Instance.new("Frame")
+    drop.Position = UDim2.new(0.6, 0, 0, 94)
+    drop.Size = UDim2.new(0.4, 0, 0, 0)
+    drop.BackgroundColor3 = PANEL
+    drop.BorderSizePixel = 0
+    drop.ClipsDescendants = true
+    drop.Visible = false
+    drop.ZIndex = 20
+    drop.Parent = page
+    corner(drop, 8)
+    local dropStroke = Instance.new("UIStroke")
+    dropStroke.Color = ACCENT
+    dropStroke.Thickness = 1.2
+    dropStroke.Transparency = 0.4
+    dropStroke.Parent = drop
+    local dropLayout = Instance.new("UIListLayout")
+    dropLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    dropLayout.Padding = UDim.new(0, 0)
+    dropLayout.Parent = drop
+    local dropPad = Instance.new("UIPadding")
+    dropPad.PaddingTop = UDim.new(0, 4)
+    dropPad.PaddingLeft = UDim.new(0, 4)
+    dropPad.PaddingRight = UDim.new(0, 4)
+    dropPad.Parent = drop
+
+    local dropOpen = false
+    local function setDrop(open)
+        dropOpen = open
+        catBtn.Text = (category and pretty(category) or "CATEGORY") .. (open and " ▴" or " ▾")
+        if open then
+            drop.Visible = true
+            TweenService:Create(drop, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { Size = UDim2.new(0.4, 0, 0, DROP_H) }):Play()
+        else
+            TweenService:Create(drop, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { Size = UDim2.new(0.4, 0, 0, 0) }):Play()
+            task.delay(0.22, function()
+                if not dropOpen then drop.Visible = false end
+            end)
+        end
+    end
+
+    for i, name in ipairs(cats) do
+        local row = Instance.new("TextButton")
+        row.LayoutOrder = i
+        row.Size = UDim2.new(1, 0, 0, ROW_H)
+        row.BackgroundTransparency = 1
+        row.BackgroundColor3 = Color3.fromRGB(40, 40, 62)
+        row.BorderSizePixel = 0
+        row.AutoButtonColor = false
+        row.Text = pretty(name)
+        row.TextColor3 = COLOR_TEXT
+        row.TextSize = 14
+        row.Font = activeFont
+        row.ZIndex = 21
+        row.Parent = drop
+        corner(row, 6)
+        row.MouseEnter:Connect(function()
+            TweenService:Create(row, TweenInfo.new(0.1), { BackgroundTransparency = 0 }):Play()
+        end)
+        row.MouseLeave:Connect(function()
+            TweenService:Create(row, TweenInfo.new(0.1), { BackgroundTransparency = 1 }):Play()
+        end)
+        getgenv().MM2HubClick(row, "MouseButton1Click", function()
+            category = name
+            setDrop(false)
+            if pending then
+                setInfo("Ready: " .. fileName(pending.path) .. " → " .. pretty(category), COLOR_GREEN)
+            end
+        end)
+    end
+
+    getgenv().MM2HubClick(catBtn, "MouseButton1Click", function()
+        setDrop(not dropOpen)
+    end)
+
+    -- MODAL: blocks the whole window until closed (an Active overlay swallows clicks on everything else)
+    local modalOpen = false
+    local function openModal(w, h, build)
+        if modalOpen then return end
+        modalOpen = true
+        if dropOpen then setDrop(false) end
+        local overlay = Instance.new("TextButton")
+        overlay.Size = UDim2.new(1, 0, 1, 0)
+        overlay.BackgroundColor3 = Color3.new(0, 0, 0)
+        overlay.BackgroundTransparency = 0.45
+        overlay.BorderSizePixel = 0
+        overlay.AutoButtonColor = false
+        overlay.Active = true
+        overlay.Text = ""
+        overlay.ZIndex = 70
+        overlay.Parent = mainFrame
+        local panel = Instance.new("Frame")
+        panel.AnchorPoint = Vector2.new(0.5, 0.5)
+        panel.Position = UDim2.new(0.5, 0, 0.5, 0)
+        panel.Size = UDim2.fromOffset(w, h)
+        panel.BackgroundColor3 = PANEL
+        panel.BorderSizePixel = 0
+        panel.ZIndex = 71
+        panel.Parent = mainFrame
+        corner(panel, 10)
+        local ps = Instance.new("UIStroke")
+        ps.Color = ACCENT
+        ps.Thickness = 1.5
+        ps.Parent = panel
+        build(panel, function()
+            overlay:Destroy()
+            panel:Destroy()
+            modalOpen = false
+        end)
+    end
+
+    local function mLabel(parent, text, pos, size, color, ts, z)
+        local l = Instance.new("TextLabel")
+        l.Position, l.Size = pos, size
+        l.BackgroundTransparency = 1
+        l.Text = text
+        l.TextColor3 = color
+        l.TextSize = ts
+        l.Font = activeFont
+        l.TextWrapped = true
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.ZIndex = z or 72
+        l.Parent = parent
+        return l
+    end
+    local function mButton(parent, text, pos, size, color)
+        local b = Instance.new("TextButton")
+        b.Position, b.Size = pos, size
+        b.BackgroundColor3 = color
+        b.BorderSizePixel = 0
+        b.AutoButtonColor = false
+        b.Text = text
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.TextSize = 14
+        b.Font = activeFont
+        b.ZIndex = 73
+        b.Parent = parent
+        corner(b, 8)
+        return b
+    end
+
+    -- ADD confirmation: nothing is imported until YES
+    local function askTrust(onYes)
+        openModal(260, 150, function(panel, close)
+            mLabel(panel, "MODULE SECURITY WARNING", UDim2.fromOffset(12, 10), UDim2.new(1, -24, 0, 22), COLOR_RED, 15)
+            mLabel(panel, "Are you sure you trust this code?", UDim2.fromOffset(12, 44), UDim2.new(1, -24, 0, 40), COLOR_TEXT, 14)
+            local yes = mButton(panel, "YES", UDim2.new(0, 12, 1, -46), UDim2.new(0.5, -18, 0, 34), COLOR_RED)
+            local no = mButton(panel, "NO", UDim2.new(0.5, 6, 1, -46), UDim2.new(0.5, -18, 0, 34), Color3.fromRGB(60, 60, 90))
+            getgenv().MM2HubClick(yes, "MouseButton1Click", function() close(); onYes() end)
+            getgenv().MM2HubClick(no, "MouseButton1Click", function() close(); setInfo("Import cancelled", COLOR_DIM) end)
+        end)
+    end
+
+    -- CHECK CODE: security report
+    local function showReport(file, res)
+        local vcolor = res.verdict == "SAFE" and COLOR_GREEN or (res.verdict == "WARNING" and COLOR_GOLD or COLOR_RED)
+        openModal(284, 400, function(panel, close)
+            mLabel(panel, "SECURITY REPORT", UDim2.fromOffset(12, 8), UDim2.new(1, -24, 0, 18), COLOR_DIM, 12)
+            local vl = mLabel(panel, res.verdict, UDim2.fromOffset(12, 26), UDim2.new(1, -24, 0, 26), vcolor, 22)
+            local blurb = res.verdict == "SAFE" and "No suspicious patterns detected."
+                or (res.verdict == "WARNING" and "Potentially dangerous functionality detected."
+                or "Strong indicators of malicious behavior.")
+            mLabel(panel, fileName(file.path) .. " - " .. blurb, UDim2.fromOffset(12, 54), UDim2.new(1, -24, 0, 30), COLOR_TEXT, 12)
+            local sc = Instance.new("ScrollingFrame")
+            sc.Position = UDim2.fromOffset(10, 90)
+            sc.Size = UDim2.new(1, -20, 1, -190)
+            sc.BackgroundColor3 = BG
+            sc.BorderSizePixel = 0
+            sc.ScrollBarThickness = 3
+            sc.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            sc.CanvasSize = UDim2.new()
+            sc.ZIndex = 72
+            sc.Parent = panel
+            corner(sc, 8)
+            local lay = Instance.new("UIListLayout")
+            lay.Padding = UDim.new(0, 6)
+            lay.Parent = sc
+            local pad = Instance.new("UIPadding")
+            pad.PaddingLeft, pad.PaddingRight, pad.PaddingTop = UDim.new(0, 6), UDim.new(0, 6), UDim.new(0, 6)
+            pad.Parent = sc
+            local function row(head, code, color)
+                local f = Instance.new("Frame")
+                f.Size = UDim2.new(1, 0, 0, 0)
+                f.AutomaticSize = Enum.AutomaticSize.Y
+                f.BackgroundTransparency = 1
+                f.ZIndex = 73
+                f.Parent = sc
+                local fl = Instance.new("UIListLayout")
+                fl.Parent = f
+                local h = mLabel(f, head, UDim2.new(), UDim2.new(1, -6, 0, 0), color, 12, 73)
+                h.AutomaticSize = Enum.AutomaticSize.Y
+                if code then
+                    local c = mLabel(f, code, UDim2.new(), UDim2.new(1, -6, 0, 0), COLOR_DIM, 11, 73)
+                    c.Font = Enum.Font.Code
+                    c.AutomaticSize = Enum.AutomaticSize.Y
+                    c.BackgroundTransparency = 0.5
+                    c.BackgroundColor3 = Color3.fromRGB(10, 10, 18)
+                end
+            end
+            for _, t in ipairs(res.summary) do row("⚠ " .. t, nil, COLOR_RED) end
+            if #res.findings == 0 and #res.summary == 0 then
+                row("Nothing matched the scanner's patterns.", nil, COLOR_GREEN)
+            end
+            for i, f in ipairs(res.findings) do
+                if i > 40 then row("... and " .. (#res.findings - 40) .. " more flagged lines", nil, COLOR_DIM) break end
+                row("Line " .. f.line .. " - " .. table.concat(f.reasons, "; "), f.text, f.sev >= 3 and COLOR_RED or (f.sev == 2 and COLOR_GOLD or COLOR_TEXT))
+            end
+            mLabel(panel, "Static text scan only: it can miss obfuscated or novel malicious code, and can flag harmless code. "
+                .. (res.verdict == "SAFE" and "SAFE does NOT mean the module is safe. " or "") .. "Only add modules from authors you trust.",
+                UDim2.new(0, 12, 1, -96), UDim2.new(1, -24, 0, 48), COLOR_DIM, 10)
+            local cb = mButton(panel, "CLOSE", UDim2.new(0, 12, 1, -44), UDim2.new(1, -24, 0, 34), ACCENT)
+            getgenv().MM2HubClick(cb, "MouseButton1Click", close)
+        end)
+    end
+
+    local checking = false
+    getgenv().MM2HubClick(checkBtn, "MouseButton1Click", function()
+        if checking or modalOpen then return end
+        if not pending then
+            setStatus(parseRepo(box.Text) and "Select a module file first" or "Invalid GitHub link", COLOR_RED)
+            return
+        end
+        checking = true
+        local file = pending
+        setInfo("Scanning " .. fileName(file.path) .. "...", COLOR_GOLD)
+        task.spawn(function()
+            local ok, src = pcall(game.HttpGet, game, file.url)
+            if not ok then
+                setInfo(tostring(src):find("404") and "File not found on GitHub (moved or deleted?)" or "Download failed (network or GitHub error)", COLOR_RED)
+            elseif type(src) ~= "string" or #src < 5 or src:sub(1, 3) == "404" then
+                setInfo("File is missing or empty", COLOR_RED)
+            else
+                local okS, res = pcall(getgenv().MM2HubModules.scan, src)
+                if okS then
+                    setInfo("Scan done: " .. res.verdict, res.verdict == "SAFE" and COLOR_GREEN or (res.verdict == "WARNING" and COLOR_GOLD or COLOR_RED))
+                    showReport(file, res)
+                else
+                    setInfo("Scan failed", COLOR_RED)
+                end
+            end
+            checking = false
+        end)
+    end)
+
+    -- ADD MODULE: checks that the selected file downloads and compiles, then saves it with its category
+    local adding = false
+    getgenv().MM2HubClick(addBtn, "MouseButton1Click", function()
+        if adding then return end
+        if not pending then
+            setStatus(parseRepo(box.Text) and "Select a module file first" or "Invalid GitHub link", COLOR_RED)
+            return
+        end
+        if not category then
+            setStatus("Pick a category first", COLOR_RED)
+            setDrop(true)
+            return
+        end
+        local file = pending
+        local cat = category
+        askTrust(function()
+        if adding then return end
+        adding = true
+        setInfo("Downloading " .. fileName(file.path) .. "...", COLOR_GOLD)
+        task.spawn(function()
+            local ok, src = pcall(game.HttpGet, game, file.url)
+            if not ok then
+                local msg = tostring(src)
+                setInfo(msg:find("404") and "File not found on GitHub (moved or deleted?)" or "Download failed (network or GitHub error)", COLOR_RED)
+                adding = false
+                return
+            end
+            if type(src) ~= "string" or #src < 5 or src:sub(1, 3) == "404" then
+                setInfo("File is missing or empty", COLOR_RED)
+                adding = false
+                return
+            end
+            local scanned = getgenv().MM2HubModules.scan(src)
+            local vOk, vErr = getgenv().MM2HubModules.validate(src)
+            if not vOk then
+                warn("MM2 Hub: module rejected: " .. tostring(vErr))
+                setInfo("Rejected: " .. tostring(vErr), COLOR_RED)
+                adding = false
+                return
+            end
+            settings.customModules = type(settings.customModules) == "table" and settings.customModules or {}
+            local replaced = false
+            for _, m in ipairs(settings.customModules) do
+                if m.url == file.url then
+                    m.category = cat
+                    m.source = src
+                    m.sum = getgenv().MM2HubModules.checksum(src)
+                    replaced = true
+                end
+            end
+            if not replaced then
+                table.insert(settings.customModules, {
+                    user = file.user, repo = file.repo, branch = file.branch,
+                    path = file.path, url = file.url, category = cat,
+                    source = src, sum = getgenv().MM2HubModules.checksum(src),
+                })
+            end
+            saveSettings()
+            if getgenv().MM2HubRefreshMyModules then pcall(getgenv().MM2HubRefreshMyModules) end
+            getgenv().MM2HubModules.refreshShelves()
+            setInfo("Added " .. fileName(file.path) .. " → " .. pretty(cat) .. " (scan: " .. scanned.verdict .. ")", COLOR_GREEN)
+            setStatus("Module added: " .. fileName(file.path) .. " → " .. pretty(cat), COLOR_GREEN)
+            adding = false
+        end)
+        end)
+    end)
+end)()
+
+-- ============================
+-- MODULES TAB: Guide button (circle, bottom-right) + centered guide image with an X to close
+-- ============================
+;(function()
+    local page = pages.MODULES
+    local guideFrame = Instance.new("Frame")
+    guideFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+    guideFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    guideFrame.Size = UDim2.fromOffset(270, 270)
+    guideFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+    guideFrame.BorderSizePixel = 0
+    guideFrame.Visible = false
+    guideFrame.ZIndex = 60
+    guideFrame.Parent = mainFrame
+    corner(guideFrame, 10)
+    local gStroke = Instance.new("UIStroke")
+    gStroke.Color = THEMES.DEFAULT.accent
+    gStroke.Thickness = 1.5
+    gStroke.Parent = guideFrame
+
+    local img = Instance.new("ImageLabel")
+    img.Position = UDim2.fromOffset(8, 34)
+    img.Size = UDim2.new(1, -16, 1, -42)
+    img.BackgroundTransparency = 1
+    img.Image = "rbxassetid://139673118140019"
+    img.ScaleType = Enum.ScaleType.Fit
+    img.ZIndex = 61
+    img.Parent = guideFrame
+
+    local title = Instance.new("TextLabel")
+    title.Position = UDim2.fromOffset(12, 6)
+    title.Size = UDim2.new(1, -52, 0, 22)
+    title.BackgroundTransparency = 1
+    title.Text = "Modules Guide"
+    title.TextColor3 = COLOR_TEXT
+    title.TextSize = 14
+    title.Font = activeFont
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.ZIndex = 61
+    title.Parent = guideFrame
+
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.AnchorPoint = Vector2.new(1, 0)
+    closeBtn.Position = UDim2.new(1, -6, 0, 6)
+    closeBtn.Size = UDim2.fromOffset(24, 24)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(40, 30, 38)
+    closeBtn.BorderSizePixel = 0
+    closeBtn.AutoButtonColor = false
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = COLOR_RED
+    closeBtn.TextSize = 14
+    closeBtn.Font = activeFont
+    closeBtn.ZIndex = 62
+    closeBtn.Parent = guideFrame
+    corner(closeBtn, 6)
+    getgenv().MM2HubClick(closeBtn, "MouseButton1Click", function() guideFrame.Visible = false end)
+
+    local gBtn = Instance.new("TextButton")
+    gBtn.AnchorPoint = Vector2.new(1, 1)
+    gBtn.Position = UDim2.new(1, -2, 1, -2)
+    gBtn.Size = UDim2.fromOffset(30, 30)
+    gBtn.BackgroundColor3 = THEMES.DEFAULT.accent
+    gBtn.BorderSizePixel = 0
+    gBtn.AutoButtonColor = false
+    gBtn.Text = "?"
+    gBtn.TextColor3 = Color3.new(1, 1, 1)
+    gBtn.TextSize = 16
+    gBtn.Font = activeFont
+    gBtn.ZIndex = 8
+    gBtn.Parent = page
+    local gc = Instance.new("UICorner")
+    gc.CornerRadius = UDim.new(1, 0)
+    gc.Parent = gBtn
+    getgenv().MM2HubClick(gBtn, "MouseButton1Click", function() guideFrame.Visible = not guideFrame.Visible end)
+    page:GetPropertyChangedSignal("Visible"):Connect(function()
+        if not page.Visible then guideFrame.Visible = false end
+    end)
+end)()
+
+-- ============================
+-- MY MODULES TAB: the modules added in the MODULES tab (tap X to remove one)
+-- ============================
+;(function()
+    local page = pages["MY MODULES"]
+    local BG = Color3.fromRGB(24, 24, 36)
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.CanvasSize = UDim2.new()
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 6)
+    layout.Parent = page
+
+    local function refresh()
+        for _, c in ipairs(page:GetChildren()) do
+            if c:IsA("GuiObject") then c:Destroy() end
+        end
+        local mods = type(settings.customModules) == "table" and settings.customModules or {}
+        if #mods == 0 then
+            local empty = Instance.new("TextLabel")
+            empty.Size = UDim2.new(1, 0, 0, 34)
+            empty.BackgroundTransparency = 1
+            empty.Text = "No modules yet. Add one in the MODULES tab."
+            empty.TextColor3 = COLOR_DIM
+            empty.TextSize = 13
+            empty.Font = activeFont
+            empty.TextWrapped = true
+            empty.ZIndex = 4
+            empty.Parent = page
+            return
+        end
+        do -- CLEAR ALL row
+            local cb, _ = makeButton(page, "🗑 CLEAR ALL MODULES", 0, COLOR_RED)
+            cb.Parent.LayoutOrder = 0
+            cb.Parent.Position = UDim2.new()
+            cb.Parent.Size = UDim2.new(1, -6, 0, 44)
+            getgenv().MM2HubClick(cb, "MouseButton1Click", function()
+                local n = #mods
+                for _, m in ipairs(mods) do getgenv().MM2HubModules.unload(m) end
+                table.clear(mods)
+                settings.customModules = mods
+                saveSettings()
+                getgenv().MM2HubModules.refreshShelves()
+                setStatus("Removed " .. n .. " module" .. (n == 1 and "" or "s"), COLOR_DIM)
+                refresh()
+            end)
+        end
+        for i, m in ipairs(mods) do
+            local row = Instance.new("Frame")
+            row.LayoutOrder = i
+            row.Size = UDim2.new(1, -6, 0, 44)
+            row.BackgroundColor3 = BG
+            row.BackgroundTransparency = 0.2
+            row.BorderSizePixel = 0
+            row.ZIndex = 3
+            row.Parent = page
+            corner(row, 8)
+            local stroke = Instance.new("UIStroke")
+            stroke.Color = THEMES.DEFAULT.accent
+            stroke.Thickness = 1.2
+            stroke.Transparency = 0.6
+            stroke.Parent = row
+
+            local name = Instance.new("TextLabel")
+            name.Position = UDim2.fromOffset(12, 4)
+            name.Size = UDim2.new(1, -52, 0, 20)
+            name.BackgroundTransparency = 1
+            name.Text = tostring(m.path or ""):match("([^/]+)$") or "module"
+            name.TextColor3 = COLOR_TEXT
+            name.TextSize = 14
+            name.Font = activeFont
+            name.TextXAlignment = Enum.TextXAlignment.Left
+            name.TextTruncate = Enum.TextTruncate.AtEnd
+            name.ZIndex = 4
+            name.Parent = row
+
+            local sub = name:Clone()
+            sub.Position = UDim2.fromOffset(12, 24)
+            sub.Size = UDim2.new(1, -52, 0, 16)
+            local cat = tostring(m.category or "")
+            sub.Text = tostring(m.user) .. "/" .. tostring(m.repo) .. "  •  " .. cat:sub(1, 1) .. cat:sub(2):lower()
+            sub.TextColor3 = COLOR_DIM
+            sub.TextSize = 12
+            sub.Parent = row
+
+            local del = Instance.new("TextButton")
+            del.Position = UDim2.new(1, -36, 0.5, -14)
+            del.Size = UDim2.fromOffset(28, 28)
+            del.BackgroundColor3 = Color3.fromRGB(40, 30, 38)
+            del.BorderSizePixel = 0
+            del.AutoButtonColor = false
+            del.Text = "✕"
+            del.TextColor3 = COLOR_RED
+            del.TextSize = 14
+            del.Font = activeFont
+            del.ZIndex = 4
+            del.Parent = row
+            corner(del, 6)
+            getgenv().MM2HubClick(del, "MouseButton1Click", function()
+                getgenv().MM2HubModules.unload(m)
+                table.remove(mods, i)
+                saveSettings()
+                getgenv().MM2HubModules.refreshShelves()
+                setStatus("Module removed: " .. tostring(name.Text), COLOR_DIM)
+                refresh()
+            end)
+        end
+    end
+    getgenv().MM2HubRefreshMyModules = refresh
+    refresh()
+end)()
+
+-- ============================
+-- SETTINGS: UPDATE LOG button. The text lives in MM2_UpdateLog.lua (newest entry first), so
+-- changes are recorded there and this script never needs editing for a log update.
+-- ============================
+;(function()
+    local logBtn = makeButton(settingsPage, "📋 UPDATE LOG", 856, Color3.fromRGB(120, 200, 255))
+    local open = false
+    getgenv().MM2HubClick(logBtn, "MouseButton1Click", function()
+        if open then return end
+        open = true
+        local overlay = Instance.new("TextButton")
+        overlay.Size = UDim2.new(1, 0, 1, 0)
+        overlay.BackgroundColor3 = Color3.new(0, 0, 0)
+        overlay.BackgroundTransparency = 0.45
+        overlay.BorderSizePixel = 0
+        overlay.AutoButtonColor = false
+        overlay.Active = true
+        overlay.Text = ""
+        overlay.ZIndex = 70
+        overlay.Parent = mainFrame
+        local panel = Instance.new("Frame")
+        panel.AnchorPoint = Vector2.new(0.5, 0.5)
+        panel.Position = UDim2.new(0.5, 0, 0.5, 0)
+        panel.Size = UDim2.fromOffset(284, 380)
+        panel.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+        panel.BorderSizePixel = 0
+        panel.ZIndex = 71
+        panel.Parent = mainFrame
+        corner(panel, 10)
+        local ps = Instance.new("UIStroke")
+        ps.Color = THEMES.DEFAULT.accent
+        ps.Thickness = 1.5
+        ps.Parent = panel
+        local function label(text, pos, size, color, ts, parent)
+            local l = Instance.new("TextLabel")
+            l.Position, l.Size = pos, size
+            l.BackgroundTransparency = 1
+            l.Text = text
+            l.TextColor3 = color
+            l.TextSize = ts
+            l.Font = activeFont
+            l.TextWrapped = true
+            l.TextXAlignment = Enum.TextXAlignment.Left
+            l.TextYAlignment = Enum.TextYAlignment.Top
+            l.ZIndex = 72
+            l.Parent = parent or panel
+            return l
+        end
+        label("Update Log", UDim2.fromOffset(12, 8), UDim2.new(1, -24, 0, 22), COLOR_TEXT, 16)
+        local sc = Instance.new("ScrollingFrame")
+        sc.Position = UDim2.fromOffset(10, 36)
+        sc.Size = UDim2.new(1, -20, 1, -90)
+        sc.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
+        sc.BorderSizePixel = 0
+        sc.ScrollBarThickness = 3
+        sc.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        sc.CanvasSize = UDim2.new()
+        sc.ZIndex = 72
+        sc.Parent = panel
+        corner(sc, 8)
+        local lay = Instance.new("UIListLayout")
+        lay.Padding = UDim.new(0, 4)
+        lay.Parent = sc
+        local pad = Instance.new("UIPadding")
+        pad.PaddingLeft, pad.PaddingRight, pad.PaddingTop, pad.PaddingBottom = UDim.new(0, 8), UDim.new(0, 8), UDim.new(0, 8), UDim.new(0, 8)
+        pad.Parent = sc
+        local function line(text, color, ts)
+            local l = label(text, UDim2.new(), UDim2.new(1, -4, 0, 0), color, ts or 13, sc)
+            l.AutomaticSize = Enum.AutomaticSize.Y
+        end
+        line("Loading...", COLOR_DIM)
+        local closeBtn = Instance.new("TextButton")
+        closeBtn.Position = UDim2.new(0, 12, 1, -44)
+        closeBtn.Size = UDim2.new(1, -24, 0, 34)
+        closeBtn.BackgroundColor3 = THEMES.DEFAULT.accent
+        closeBtn.BorderSizePixel = 0
+        closeBtn.AutoButtonColor = false
+        closeBtn.Text = "CLOSE"
+        closeBtn.TextColor3 = Color3.new(1, 1, 1)
+        closeBtn.TextSize = 14
+        closeBtn.Font = activeFont
+        closeBtn.ZIndex = 73
+        closeBtn.Parent = panel
+        corner(closeBtn, 8)
+        getgenv().MM2HubClick(closeBtn, "MouseButton1Click", function()
+            overlay:Destroy()
+            panel:Destroy()
+            open = false
+        end)
+        task.spawn(function()
+            local base = getgenv().MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
+            local ok, entries = pcall(function()
+                return loadstring(game:HttpGet(base .. "MM2_UpdateLog.lua?cb=" .. tostring(os.time())))()
+            end)
+            if not panel.Parent then return end
+            for _, c in ipairs(sc:GetChildren()) do
+                if c:IsA("TextLabel") then c:Destroy() end
+            end
+            if not ok or type(entries) ~= "table" then
+                line("Couldn't load the update log (MM2_UpdateLog.lua).", COLOR_RED)
+                return
+            end
+            for _, e in ipairs(entries) do
+                line(tostring(e.title or e.date or "Update"), COLOR_GOLD, 14)
+                for _, c in ipairs(e.changes or {}) do line("• " .. tostring(c), COLOR_TEXT, 12) end
+            end
+        end)
+    end)
+end)()
 
 -- ============================
 -- START
@@ -4258,4 +5229,4 @@ if getgenv().MM2HubNotice then
     getgenv().MM2HubNotice = nil
 end
 
-print("MM2 Helper v3.19 Loaded - toast notifications, live See All, safe reach hitbox, fixed invis + auto coin")
+print("MM2 Helper v3.20 Loaded - toast notifications, live See All, safe reach hitbox, fixed invis + auto coin")
