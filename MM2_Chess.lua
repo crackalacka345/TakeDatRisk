@@ -867,8 +867,11 @@ function Chess.open(ctx)
     fakeApplyBtn.ZIndex = 21
     fakeApplyBtn.Visible = false
 
-    local fakeBtn = mkBtn(fakePanel, "REQUEST ACCESS", UDim2.new(0, 200, 0, 30), UDim2.new(0.5, -100, 0, 190), accent)
+    -- two buttons side by side: the main request button, and REQUEST AGAIN to send it once more
+    local fakeBtn = mkBtn(fakePanel, "REQUEST ACCESS", UDim2.new(0, 142, 0, 30), UDim2.new(0.5, -148, 0, 190), accent)
     fakeBtn.ZIndex = 21
+    local fakeAgainBtn = mkBtn(fakePanel, "REQUEST AGAIN", UDim2.new(0, 142, 0, 30), UDim2.new(0.5, 6, 0, 190), Color3.fromRGB(60, 60, 90))
+    fakeAgainBtn.ZIndex = 21
 
     local access = { state = "checking", err = nil }
 
@@ -883,6 +886,7 @@ function Chess.open(ctx)
         fakeInfo.TextColor3 = C_DIM
         local granted = access.state == "granted"
         fakeBtn.Visible = not granted
+        fakeAgainBtn.Visible = not granted
         fakeValueLabel.Visible = granted
         fakeValueBox.Visible = granted
         fakeApplyBtn.Visible = granted
@@ -892,8 +896,8 @@ function Chess.open(ctx)
             fakeInfo.Text = "Request sent. Waiting for approval..."
             fakeBtn.Text = "PENDING..."
         elseif access.state == "denied" then
-            fakeInfo.Text = "Your request was denied."
-            fakeBtn.Text = "REQUEST AGAIN"
+            fakeInfo.Text = "Your request was denied. Press REQUEST AGAIN to ask once more."
+            fakeBtn.Text = "REQUEST ACCESS"
         elseif access.state == "offline" then
             fakeInfo.Text = "Couldn't reach the access system." .. (access.err and ("\n" .. access.err) or "")
             fakeBtn.Text = "RETRY"
@@ -968,8 +972,8 @@ function Chess.open(ctx)
     end)
     renderFake()
 
-    bindClick(fakeBtn, "MouseButton1Click", function()
-        if access.state == "pending" or access.state == "granted" or access.state == "checking" then return end
+    -- sends the request; REQUEST AGAIN can do it while a request is still pending
+    local function sendRequest()
         setAccess("pending")
         task.spawn(function()
             local st, msgId, err = Access.request(uid, player.Name)
@@ -985,6 +989,15 @@ function Chess.open(ctx)
             applyStatus(st)
             if access.state == "pending" then pollAccess() end
         end)
+    end
+
+    bindClick(fakeBtn, "MouseButton1Click", function()
+        if access.state == "pending" or access.state == "granted" or access.state == "checking" then return end
+        sendRequest()
+    end)
+    bindClick(fakeAgainBtn, "MouseButton1Click", function()
+        if access.state == "granted" or access.state == "checking" then return end
+        sendRequest()
     end)
 
     bindClick(fakeApplyBtn, "MouseButton1Click", function()
