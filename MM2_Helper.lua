@@ -1,4 +1,4 @@
--- MM2 Helper v3.20 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.31 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -358,7 +358,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.20"
+versionBadge.Text = "v3.31"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -3589,7 +3589,7 @@ do -- ANIMATED UI toggle
         setStatus(settings.animatedUI and "Animated UI on" or "Animated UI off", COLOR_GREEN)
     end)
     if settingsPage:IsA("ScrollingFrame") then
-        settingsPage.CanvasSize = UDim2.new(0, 0, 0, 930)
+        settingsPage.CanvasSize = UDim2.new(0, 0, 0, 990)
     end
 end
 
@@ -4633,12 +4633,54 @@ end)()
 end)()
 
 -- ============================
--- SETTINGS: UPDATE LOG button. The text lives in MM2_UpdateLog.lua (newest entry first), so
--- changes are recorded there and this script never needs editing for a log update.
+-- SETTINGS: UPDATE LOG button. Reads the repo's recent GitHub commits (the commit messages ARE the log),
+-- re-checks every 2 minutes and flags the button when something new lands. If GitHub can't be reached it
+-- falls back to MM2_UpdateLog.lua.
 -- ============================
 ;(function()
     local logBtn = makeButton(settingsPage, "📋 UPDATE LOG", 856, Color3.fromRGB(120, 200, 255))
-    local open = false
+    local open, renderFn = false, nil
+    local base = getgenv().MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
+    local LOG_TEXT = "📋 UPDATE LOG"
+
+    -- returns entries ({title, changes}), newest sha (nil when the fallback file was used)
+    local function getEntries()
+        local user, repo, branch = base:match("githubusercontent%.com/([^/]+)/([^/]+)/([^/]+)/")
+        if user then
+            local ok, body = pcall(game.HttpGet, game, "https://api.github.com/repos/" .. user .. "/" .. repo
+                .. "/commits?sha=" .. branch .. "&per_page=40")
+            if ok and type(body) == "string" then
+                local okJ, data = pcall(function() return HttpService:JSONDecode(body) end)
+                if okJ and type(data) == "table" and type(data[1]) == "table" and data[1].sha then
+                    local entries, byDate = {}, {}
+                    for _, c in ipairs(data) do
+                        local cm = c.commit or {}
+                        local date = tostring(cm.author and cm.author.date or "?"):sub(1, 10)
+                        local msg = tostring(cm.message or ""):match("^[^\n]+") or "(no message)"
+                        if not byDate[date] then
+                            byDate[date] = { title = date, changes = {} }
+                            table.insert(entries, byDate[date])
+                        end
+                        table.insert(byDate[date].changes, msg)
+                    end
+                    return entries, data[1].sha
+                end
+            end
+        end
+        local okF, entries = pcall(function()
+            return loadstring(game:HttpGet(base .. "MM2_UpdateLog.lua?cb=" .. tostring(os.time())))()
+        end)
+        if okF and type(entries) == "table" then return entries, nil end
+        return nil
+    end
+
+    local function markSeen(sha)
+        if sha and settings.logSeenSha ~= sha then
+            settings.logSeenSha = sha
+            saveSettings()
+        end
+        logBtn.Text = LOG_TEXT
+    end
     getgenv().MM2HubClick(logBtn, "MouseButton1Click", function()
         if open then return end
         open = true
@@ -4719,27 +4761,101 @@ end)()
         getgenv().MM2HubClick(closeBtn, "MouseButton1Click", function()
             overlay:Destroy()
             panel:Destroy()
+            renderFn = nil
             open = false
         end)
-        task.spawn(function()
-            local base = getgenv().MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
-            local ok, entries = pcall(function()
-                return loadstring(game:HttpGet(base .. "MM2_UpdateLog.lua?cb=" .. tostring(os.time())))()
-            end)
-            if not panel.Parent then return end
+        local function fill(entries)
             for _, c in ipairs(sc:GetChildren()) do
                 if c:IsA("TextLabel") then c:Destroy() end
             end
-            if not ok or type(entries) ~= "table" then
-                line("Couldn't load the update log (MM2_UpdateLog.lua).", COLOR_RED)
+            if not entries then
+                line("Couldn't load the update log (GitHub unreachable).", COLOR_RED)
                 return
             end
             for _, e in ipairs(entries) do
                 line(tostring(e.title or e.date or "Update"), COLOR_GOLD, 14)
                 for _, c in ipairs(e.changes or {}) do line("• " .. tostring(c), COLOR_TEXT, 12) end
             end
+        end
+        task.spawn(function()
+            local entries, sha = getEntries()
+            if not panel.Parent then return end
+            fill(entries)
+            markSeen(sha)
+            renderFn = function(e, sh) -- live refresh while the log is open
+                if not panel.Parent then renderFn = nil return end
+                fill(e)
+                markSeen(sh)
+            end
         end)
     end)
+
+    -- constant check: every 2 minutes (GitHub allows 60 anonymous calls/hour)
+    task.spawn(function()
+        while logBtn.Parent do
+            local ok, entries, sha = pcall(getEntries)
+            if ok and sha then
+                if open and renderFn then
+                    renderFn(entries, sha)
+                elseif settings.logSeenSha == nil then
+                    markSeen(sha) -- first run: nothing is "new" yet
+                elseif settings.logSeenSha ~= sha then
+                    logBtn.Text = LOG_TEXT .. " (NEW)"
+                    if not open then setStatus("Update log: new changes on GitHub", COLOR_GREEN) end
+                end
+            end
+            task.wait(120)
+        end
+    end)
+end)()
+
+-- ============================
+-- SETTINGS: UI STYLE button. Cycles Classic -> Glass -> Sidebar. The looks live in MM2_Skin_Glass.lua /
+-- MM2_Skin_Sidebar.lua; each only restyles the existing window and can be reverted, so Classic is always one click away.
+-- ============================
+;(function()
+    local STYLES = { "CLASSIC", "GLASS", "SIDEBAR" }
+    local FILES = { GLASS = "MM2_Skin_Glass.lua", SIDEBAR = "MM2_Skin_Sidebar.lua" }
+    local styleBtn = makeButton(settingsPage, "🎨 UI STYLE: " .. tostring(settings.uiStyle or "CLASSIC"), 906, Color3.fromRGB(200, 140, 255))
+    local currentRevert, busy = nil, false
+    local function applyStyle(name)
+        if busy then return end
+        busy = true
+        if currentRevert then pcall(currentRevert) currentRevert = nil end
+        local file = FILES[name]
+        if file then
+            local base = getgenv().MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
+            local ok, res = pcall(function()
+                local build = loadstring(game:HttpGet(base .. file .. "?cb=" .. tostring(os.time())))()
+                return build({ mainFrame = mainFrame, pages = pages, tabButtons = tabButtons, TAB_NAMES = TAB_NAMES,
+                    headerBar = headerBar, uiScale = uiScale })
+            end)
+            if ok and type(res) == "function" then
+                currentRevert = res
+            else
+                warn("MM2 Hub: skin " .. file .. " failed: " .. tostring(res))
+                setStatus("Couldn't load the " .. name:lower() .. " style: staying on Classic", COLOR_RED)
+                name = "CLASSIC"
+            end
+        end
+        settings.uiStyle = name
+        saveSettings()
+        styleBtn.Text = "🎨 UI STYLE: " .. name
+        busy = false
+    end
+    getgenv().MM2HubClick(styleBtn, "MouseButton1Click", function()
+        local cur = settings.uiStyle or "CLASSIC"
+        for i, n in ipairs(STYLES) do
+            if n == cur then
+                task.spawn(applyStyle, STYLES[i % #STYLES + 1])
+                return
+            end
+        end
+        task.spawn(applyStyle, "CLASSIC")
+    end)
+    if settings.uiStyle and FILES[settings.uiStyle] then
+        task.spawn(function() task.wait(0.5) applyStyle(settings.uiStyle) end)
+    end
 end)()
 
 -- ============================
@@ -5229,4 +5345,4 @@ if getgenv().MM2HubNotice then
     getgenv().MM2HubNotice = nil
 end
 
-print("MM2 Helper v3.20 Loaded - toast notifications, live See All, safe reach hitbox, fixed invis + auto coin")
+print("MM2 Helper v3.19 Loaded - toast notifications, live See All, safe reach hitbox, fixed invis + auto coin")
