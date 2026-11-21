@@ -25,7 +25,7 @@ end
 -- the UI library sits next to this file in the repo (same base url the loader sets)
 local VapeUI
 do
-    local base = G.MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
+    local base = G.MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
     local okLib, libSrc = pcall(game.HttpGet, game, base .. "VapeUI_Lib.lua?cb=" .. tostring(os.time()))
     if not okLib or type(libSrc) ~= "string" or #libSrc < 200 then
         error("VapeUI: couldn't download VapeUI_Lib.lua", 0)
