@@ -1,4 +1,4 @@
--- MM2 Helper v3.18 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.19 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -48,7 +48,7 @@ getgenv().MM2HubClick = function(obj, evName, fn)
 end
 
 for _, gui in pairs(playerGui:GetChildren()) do
-    if gui.Name == "MM2_Helper_GUI" or gui.Name == "MM2Hub_StackGame" then
+    if gui.Name == "MM2_Helper_GUI" or gui.Name == "MM2Hub_StackGame" or gui.Name == "MM2Hub_Notify" then
         gui:Destroy()
     end
 end
@@ -358,7 +358,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.18"
+versionBadge.Text = "v3.19"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -366,8 +366,125 @@ versionBadge.ZIndex = 4
 versionBadge.Parent = headerBar
 corner(versionBadge, 5)
 
+-- NOTIFICATIONS: small toast in the bottom-right corner (VapeUI style):
+--   "Module name (ON)" / "Module name (OFF)", fades out after 3 seconds
+do
+    for _, g in ipairs(playerGui:GetChildren()) do
+        if g.Name == "MM2Hub_Notify" then g:Destroy() end
+    end
+    local NOTIFY_TIME = 3
+    local host = Instance.new("ScreenGui")
+    host.Name = "MM2Hub_Notify"
+    host.ResetOnSpawn = false
+    host.DisplayOrder = 150
+    host.IgnoreGuiInset = true
+    host.Parent = playerGui
+
+    local list = Instance.new("Frame")
+    list.AnchorPoint = Vector2.new(1, 1)
+    list.Position = UDim2.new(1, -14, 1, -14)
+    list.Size = UDim2.new(0, 260, 1, -28)
+    list.BackgroundTransparency = 1
+    list.Parent = host
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+    layout.Padding = UDim.new(0, 6)
+    layout.Parent = list
+
+    local counter = 0
+    local lastText, lastTime = nil, 0
+    local ON_HEX, OFF_HEX = "#50dc78", "#ff5a5a"
+
+    local function esc(t)
+        return (tostring(t):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
+    end
+
+    -- "Auto Coin ON" / "Speed OFF" / "Auto Coin (ON)" -> name + state
+    local function splitToggle(text)
+        local name, state = string.match(text, "^(.-)%s*%(?(ON)%)?$")
+        if not name then name, state = string.match(text, "^(.-)%s*%(?(OFF)%)?$") end
+        if name and name ~= "" then return name, state end
+        return nil
+    end
+
+    getgenv().MM2HubNotify = function(text, color)
+        text = tostring(text or "")
+        if text == "" then return end
+        local now = os.clock()
+        if text == lastText and now - lastTime < 0.4 then return end -- no double-fire spam
+        lastText, lastTime = text, now
+
+        local name, state = splitToggle(text)
+        local accent = color or COLOR_DIM
+        local rich
+        if name then
+            local hex = state == "ON" and ON_HEX or OFF_HEX
+            accent = state == "ON" and COLOR_GREEN or COLOR_RED
+            rich = esc(name) .. ' <font color="' .. hex .. '"><b>(' .. state .. ')</b></font>'
+        else
+            rich = esc(text)
+        end
+
+        counter = counter + 1
+        local card = Instance.new("CanvasGroup")
+        card.Size = UDim2.new(1, 0, 0, 0)
+        card.AutomaticSize = Enum.AutomaticSize.Y
+        card.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+        card.BorderSizePixel = 0
+        card.GroupTransparency = 1
+        card.LayoutOrder = counter
+        card.Parent = list
+        corner(card, 5)
+
+        local bar = Instance.new("Frame")
+        bar.Size = UDim2.new(0, 3, 1, 0)
+        bar.BackgroundColor3 = accent
+        bar.BorderSizePixel = 0
+        bar.Parent = card
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Position = UDim2.fromOffset(3, 0)
+        lbl.Size = UDim2.new(1, -3, 0, 0)
+        lbl.AutomaticSize = Enum.AutomaticSize.Y
+        lbl.BackgroundTransparency = 1
+        lbl.RichText = true
+        lbl.Text = rich
+        lbl.TextColor3 = COLOR_TEXT
+        lbl.Font = Enum.Font.GothamBold
+        lbl.TextSize = 15
+        lbl.TextWrapped = true
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.Parent = card
+        local pad = Instance.new("UIPadding")
+        pad.PaddingLeft = UDim.new(0, 12)
+        pad.PaddingRight = UDim.new(0, 10)
+        pad.PaddingTop = UDim.new(0, 10)
+        pad.PaddingBottom = UDim.new(0, 12)
+        pad.Parent = lbl
+
+        local timer = Instance.new("Frame")
+        timer.AnchorPoint = Vector2.new(0, 1)
+        timer.Position = UDim2.new(0, 0, 1, 0)
+        timer.Size = UDim2.new(1, 0, 0, 2)
+        timer.BackgroundColor3 = accent
+        timer.BorderSizePixel = 0
+        timer.Parent = card
+
+        TweenService:Create(card, TweenInfo.new(0.2), { GroupTransparency = 0 }):Play()
+        TweenService:Create(timer, TweenInfo.new(NOTIFY_TIME, Enum.EasingStyle.Linear), { Size = UDim2.new(0, 0, 0, 2) }):Play()
+        task.delay(NOTIFY_TIME, function()
+            if not card.Parent then return end
+            TweenService:Create(card, TweenInfo.new(0.3), { GroupTransparency = 1 }):Play()
+            task.wait(0.35)
+            if card.Parent then card:Destroy() end
+        end)
+    end
+end
+
 -- PAGES + TABS
-local TAB_NAMES = { "ESP", "COMBAT", "PLAYER", "GAMES", "SETTINGS", "UI" }
+local TAB_NAMES = { "ESP", "COMBAT", "PLAYER", "GAMES", "MODULES", "MY MODULES", "SETTINGS", "UI" }
 local tabButtons, pages = {}, {}
 
 local function makePage(name, scroll)
@@ -383,7 +500,7 @@ local function makePage(name, scroll)
         page.BorderSizePixel = 0
     end
     page.Name = name .. "Page"
-    page.Size = UDim2.new(1, -24, 0, 290)
+    page.Size = UDim2.new(1, -24, 1, -108)
     page.Position = UDim2.new(0, 12, 0, 96)
     page.BackgroundTransparency = 1
     page.Visible = false
@@ -397,6 +514,8 @@ makePage("ESP", false)
 makePage("COMBAT", true)
 makePage("PLAYER", false)
 makePage("GAMES", true)
+makePage("MODULES", false)
+makePage("MY MODULES", true)
 makePage("SETTINGS", true)
 makePage("UI", false)
 
@@ -415,63 +534,55 @@ local function setTab(name)
     end
 end
 
+do -- (own scope: the file is close to Lua's 200 local variable limit)
+local tabStrip = Instance.new("ScrollingFrame")
+tabStrip.Size = UDim2.new(1, -16, 0, 38)
+tabStrip.Position = UDim2.new(0, 8, 0, 54)
+tabStrip.BackgroundTransparency = 1
+tabStrip.BorderSizePixel = 0
+tabStrip.ScrollBarThickness = 2
+tabStrip.ScrollBarImageColor3 = activeThemeDef.accent
+tabStrip.ScrollingDirection = Enum.ScrollingDirection.X
+tabStrip.ZIndex = 4
+tabStrip.Parent = mainFrame
+tabStrip.InputChanged:Connect(function(input) -- mouse wheel scrolls the tabs sideways
+    if input.UserInputType == Enum.UserInputType.MouseWheel then
+        tabStrip.CanvasPosition = Vector2.new(math.max(0, tabStrip.CanvasPosition.X - input.Position.Z * 60), 0)
+    end
+end)
+local tabX = 2
 for i, name in ipairs(TAB_NAMES) do
     local tb = Instance.new("TextButton")
-    tb.Size = UDim2.new(1 / #TAB_NAMES, -8, 0, 30)
-    tb.Position = UDim2.new((i - 1) / #TAB_NAMES, 4, 0, 56)
+    local w = #name * 8 + 20
+    tb.Size = UDim2.fromOffset(w, 30)
+    tb.Position = UDim2.fromOffset(tabX, 2)
+    tabX = tabX + w + 4
     tb.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
     tb.BorderSizePixel = 0
     tb.AutoButtonColor = false
     tb.Text = name
     tb.TextColor3 = COLOR_DIM
-    tb.TextScaled = true
+    tb.TextSize = 14
     tb.Font = activeFont
     tb.ZIndex = 4
-    tb.Parent = mainFrame
+    tb.Parent = tabStrip
     corner(tb, 6)
     getgenv().MM2HubClick(tb, "MouseButton1Click", function()
         setTab(name)
     end)
     tabButtons[name] = tb
 end
+tabStrip.CanvasSize = UDim2.new(0, tabX, 0, 0)
+end
 
 local espPage, combatPage, playerPage, gamesPage, settingsPage =
     pages.ESP, pages.COMBAT, pages.PLAYER, pages.GAMES, pages.SETTINGS
-
--- RESULT / STATUS BOX
-local resultContainer = Instance.new("Frame")
-resultContainer.Size = UDim2.new(1, -24, 0, 60)
-resultContainer.Position = UDim2.new(0, 12, 0, 398)
-resultContainer.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
-resultContainer.BackgroundTransparency = 0.15
-resultContainer.BorderSizePixel = 0
-resultContainer.ZIndex = 3
-resultContainer.Parent = mainFrame
-corner(resultContainer, 8)
-
-local resultStroke = Instance.new("UIStroke")
-resultStroke.Color = Color3.fromRGB(40, 40, 65)
-resultStroke.Thickness = 1
-resultStroke.Parent = resultContainer
-
-local resultLabel = Instance.new("TextLabel")
-resultLabel.Size = UDim2.new(1, -16, 1, 0)
-resultLabel.Position = UDim2.new(0, 8, 0, 0)
-resultLabel.BackgroundTransparency = 1
-resultLabel.Text = "Pick a tab to get started..."
-resultLabel.TextColor3 = COLOR_DIM
-resultLabel.TextScaled = true
-resultLabel.TextWrapped = true
-resultLabel.Font = activeFont
-resultLabel.ZIndex = 4
-resultLabel.Parent = resultContainer
 
 -- ============================
 -- HELPERS
 -- ============================
 local function setStatus(text, color)
-    resultLabel.Text = text
-    resultLabel.TextColor3 = color or COLOR_DIM
+    getgenv().MM2HubNotify(text, color)
 end
 
 local function setToggleVisual(stroke, on)
@@ -901,7 +1012,7 @@ local function refreshViewBoth(force)
         addBillboard(z, "🧟 ZOMBIE", COLOR_GREEN)
         table.insert(lines, "🧟 " .. z.DisplayName .. " = ZOMBIE")
     end
-    setStatus(table.concat(lines, "\n"), COLOR_TEXT)
+    lines = nil -- redraws are silent now
 end
 
 getgenv().MM2HubClick(viewBothBtn, "MouseButton1Click", function()
@@ -919,6 +1030,7 @@ getgenv().MM2HubClick(viewBothBtn, "MouseButton1Click", function()
     end
     viewBothBtn.Text = "👁 HIDE BOTH"
     setToggleVisual(viewBothStroke, true)
+    setStatus("VIEW BOTH ON")
     lastMurd, lastSheriff = nil, nil
     refreshViewBoth(true)
     task.spawn(function()
@@ -930,31 +1042,59 @@ getgenv().MM2HubClick(viewBothBtn, "MouseButton1Click", function()
 end)
 
 local seeAllOn = false
-getgenv().MM2HubClick(seeAllBtn, "MouseButton1Click", function()
-    seeAllOn = not seeAllOn
-    clearOutlines()
-    if not seeAllOn then
-        seeAllBtn.Text = "◈ SEE ALL"
-        setToggleVisual(seeAllStroke, false)
-        setStatus("SEE ALL OFF")
-        return
+local seeAllGen = 0
+do
+    -- Red: Murderer (has the knife) | Blue: Sheriff (has the gun) | Green: Innocent
+    local function roleOf(plr)
+        if hasToolMatching(plr, "knife") then return "murderer", COLOR_RED end
+        if hasToolMatching(plr, "gun") then return "sheriff", COLOR_BLUE end
+        return "innocent", COLOR_GREEN
     end
-    seeAllBtn.Text = "◈ HIDE ALL"
-    setToggleVisual(seeAllStroke, true)
-    local murderers, innocents = 0, 0
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= player and plr.Character then
-            if hasToolMatching(plr, "knife") then
-                outlinePlayer(plr, true, COLOR_RED)
-                murderers = murderers + 1
-            else
-                outlinePlayer(plr, true, COLOR_GREEN)
-                innocents = innocents + 1
+
+    local applied = {} -- [Player] = { role = "...", char = Model }
+
+    local function refreshSeeAll()
+        for plr, info in pairs(applied) do
+            if not plr.Parent then applied[plr] = nil end
+        end
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= player and plr.Character then
+                local role, color = roleOf(plr)
+                local info = applied[plr]
+                local hl = plr.Character:FindFirstChild("OutlineHighlight")
+                if not info or info.role ~= role or info.char ~= plr.Character or not hl then
+                    outlinePlayer(plr, true, color)
+                    applied[plr] = { role = role, char = plr.Character }
+                end
             end
         end
     end
-    setStatus("Highlighted " .. innocents .. " innocent, " .. murderers .. " murderer", COLOR_TEXT)
-end)
+
+    getgenv().MM2HubClick(seeAllBtn, "MouseButton1Click", function()
+        seeAllOn = not seeAllOn
+        seeAllGen = seeAllGen + 1
+        local gen = seeAllGen
+        clearOutlines()
+        table.clear(applied)
+        if not seeAllOn then
+            seeAllBtn.Text = "◈ SEE ALL"
+            setToggleVisual(seeAllStroke, false)
+            setStatus("SEE ALL OFF")
+            return
+        end
+        seeAllBtn.Text = "◈ HIDE ALL"
+        setToggleVisual(seeAllStroke, true)
+        setStatus("SEE ALL ON")
+        pcall(refreshSeeAll)
+        task.spawn(function()
+            -- keeps updating: whoever picks up the knife / gun changes colour live
+            while seeAllOn and gen == seeAllGen and HUB_GEN == getgenv().MM2HubGen do
+                task.wait(0.35)
+                pcall(refreshSeeAll)
+            end
+        end)
+    end)
+end
 
 -- TRACERS
 local tracersOn = false
@@ -1440,7 +1580,7 @@ getgenv().MM2HubClick(autoShootBtn, "MouseButton1Click", function()
         rs.Thickness = 2
         rs.Parent = ring
 
-        setStatus("AUTO SHOOT ON: get the murderer inside the ring", COLOR_BLUE)
+        setStatus("AUTO SHOOT ON", COLOR_BLUE)
         startAutoShootLoop()
     else
         autoShootOn = false
@@ -1677,7 +1817,7 @@ getgenv().MM2HubClick(autoMurdWinBtn, "MouseButton1Click", function()
     if murdWinOn then
         autoMurdWinBtn.Text = "⚔ STOP MURD WIN"
         setToggleVisual(murdWinStroke, true)
-        setStatus("AUTO MURD WIN ACTIVE", COLOR_RED)
+        setStatus("AUTO MURD WIN ON", COLOR_RED)
         task.spawn(murdWinLoop)
     else
         autoMurdWinBtn.Text = "⚔ AUTO MURD WIN"
@@ -1756,44 +1896,53 @@ local reachSize = math.clamp(tonumber(settings.reachSize) or 10, REACH_MIN, REAC
 local function reachVector()
     return Vector3.new(reachSize, reachSize, reachSize)
 end
-local reachOriginal = {} -- [Player] = { hrp, size, transparency, collide = {[part] = canCollide} }
+-- Hitbox helper: instead of resizing the player's real HumanoidRootPart (that is what froze
+-- everybody), a separate see-through box is welded to it. The real character is never modified.
+do
+    local lib = {}
+    function lib.ensure(plr, name, size, transparency)
+        local char = plr.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local box = char:FindFirstChild(name)
+        if box and box:IsA("BasePart") then
+            if box.Size ~= size then box.Size = size end
+            local weld = box:FindFirstChildOfClass("WeldConstraint")
+            if weld and weld.Part0 == hrp then return end
+            box:Destroy()
+        end
+        box = Instance.new("Part")
+        box.Name = name
+        box.Size = size
+        box.Transparency = transparency or 0.75
+        box.Color = Color3.fromRGB(255, 60, 100)
+        box.Material = Enum.Material.SmoothPlastic
+        box.CanCollide = false
+        box.CanTouch = false
+        box.CanQuery = true
+        box.Massless = true
+        box.CastShadow = false
+        box.CFrame = hrp.CFrame
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = hrp
+        weld.Part1 = box
+        weld.Parent = box
+        box.Parent = char
+    end
+    function lib.remove(plr, name)
+        local char = plr.Character
+        local box = char and char:FindFirstChild(name)
+        if box then box:Destroy() end
+    end
+    getgenv().MM2HubHitbox = lib
+end
 
 local function setReach(plr, on)
-    local char = plr.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    local saved = reachOriginal[plr]
-
+    local lib = getgenv().MM2HubHitbox
     if on then
-        if not saved or saved.hrp ~= hrp then
-            saved = { hrp = hrp, size = hrp.Size, transparency = hrp.Transparency, collide = {},
-                massless = hrp.Massless, canTouch = hrp.CanTouch }
-            reachOriginal[plr] = saved
-        end
-        hrp.Size = reachVector()
-        hrp.Transparency = 0.7
-        -- a big heavy part can shove you when it overlaps: make it weightless and untouchable
-        hrp.Massless = true
-        hrp.CanTouch = false
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                if saved.collide[part] == nil then
-                    saved.collide[part] = part.CanCollide
-                end
-                part.CanCollide = false
-            end
-        end
-    elseif saved and saved.hrp == hrp then
-        hrp.Size = saved.size
-        hrp.Transparency = saved.transparency
-        hrp.Massless = saved.massless
-        hrp.CanTouch = saved.canTouch
-        for part, cc in pairs(saved.collide) do
-            if part.Parent then
-                part.CanCollide = cc
-            end
-        end
-        reachOriginal[plr] = nil
+        lib.ensure(plr, "MM2_ReachBox", reachVector(), 0.75)
+    else
+        lib.remove(plr, "MM2_ReachBox")
     end
 end
 
@@ -1951,17 +2100,17 @@ end
 do
     local HITBOX = 14
     local on = false
-    local originals = setmetatable({}, { __mode = "k" }) -- HRP -> original values
+    local lastTarget = nil
 
     local hbBtn, hbStroke = makeButton(combatPage, "🎯 SHERIFF HITBOX EXPANDER", 250, COLOR_RED)
 
     local function restoreAll()
-        for hrp, o in pairs(originals) do
-            if hrp.Parent then
-                hrp.Size = o.size
-                hrp.CanCollide = o.canCollide
-            end
-            originals[hrp] = nil
+        if lastTarget then
+            getgenv().MM2HubHitbox.remove(lastTarget, "MM2_MurdBox")
+            lastTarget = nil
+        end
+        for _, plr in ipairs(Players:GetPlayers()) do
+            getgenv().MM2HubHitbox.remove(plr, "MM2_MurdBox")
         end
     end
 
@@ -1971,13 +2120,13 @@ do
         acc = acc + dt
         if acc < 0.5 then return end
         acc = 0
-        restoreAll()
         local m = findMurderer()
-        local hrp = m and m.Character and m.Character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            originals[hrp] = { size = hrp.Size, canCollide = hrp.CanCollide }
-            hrp.Size = Vector3.new(HITBOX, HITBOX, HITBOX)
-            hrp.CanCollide = false
+        if lastTarget and lastTarget ~= m then
+            getgenv().MM2HubHitbox.remove(lastTarget, "MM2_MurdBox")
+        end
+        lastTarget = m
+        if m then
+            getgenv().MM2HubHitbox.ensure(m, "MM2_MurdBox", Vector3.new(HITBOX, HITBOX, HITBOX), 0.75)
         end
     end)
 
@@ -1985,10 +2134,10 @@ do
         on = not on
         setToggleVisual(hbStroke, on)
         if on then
-            setStatus("🎯 Sheriff hitbox expander ON", COLOR_RED)
+            setStatus("SHERIFF HITBOX EXPANDER ON", COLOR_RED)
         else
             restoreAll()
-            setStatus("Sheriff hitbox expander OFF")
+            setStatus("SHERIFF HITBOX EXPANDER OFF")
         end
     end)
 end
@@ -2437,24 +2586,51 @@ local function getCoins()
     return list
 end
 
+-- Moves the character to the coin at COIN speed, frame by frame (Heartbeat). The old tween
+-- fought the Humanoid physics (gravity/collisions) so the character got stuck or never touched
+-- the coin. Parts are noclipped while travelling and velocity is zeroed every frame.
 local function tweenToCoin(root, coin)
-    local dist = (coin.Position - root.Position).Magnitude
-    local duration = math.max(0.05, dist / (settings.coinSpeed or COIN_SPEED))
-    local tween = TweenService:Create(root, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
-        CFrame = CFrame.new(coin.Position + Vector3.new(0, 3, 0)),
-    })
-    local done = false
-    local conn = tween.Completed:Connect(function()
-        done = true
-    end)
-    tween:Play()
-    local t = 0
-    while not done and autoCoinOn and coin.Parent and t < duration + 1 and HUB_GEN == getgenv().MM2HubGen and not getgenv().MM2HubCoinHide do
-        task.wait(0.05)
-        t = t + 0.05
+    local char = root.Parent
+    local speed = settings.coinSpeed or COIN_SPEED
+    local startDist = (coin.Position - root.Position).Magnitude
+    local maxTime = startDist / speed + 1.5
+
+    local saved = {}
+    if char then
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") then
+                saved[p] = p.CanCollide
+                p.CanCollide = false
+            end
+        end
     end
-    conn:Disconnect()
-    tween:Cancel()
+
+    local t = 0
+    while autoCoinOn and coin.Parent and root.Parent and t < maxTime
+        and HUB_GEN == getgenv().MM2HubGen and not getgenv().MM2HubCoinHide do
+        local dt = RunService.Heartbeat:Wait()
+        t = t + dt
+        local delta = coin.Position - root.Position
+        local dist = delta.Magnitude
+        if dist < 1 then break end
+        local step = math.min(dist, speed * dt)
+        root.CFrame = root.CFrame + delta.Unit * step
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end
+
+    -- make sure the touch registers even if the physics touch didn't fire
+    if coin.Parent and root.Parent and typeof(firetouchinterest) == "function" then
+        pcall(function()
+            firetouchinterest(root, coin, 0)
+            task.wait()
+            firetouchinterest(root, coin, 1)
+        end)
+    end
+
+    for p, cc in pairs(saved) do
+        if p.Parent then p.CanCollide = cc end
+    end
 end
 
 local function autoCoinLoop()
@@ -2583,7 +2759,6 @@ local function autoCoinLoop()
                 if not got then
                     skipped[coin] = true
                 end
-                setStatus("Auto Coin: " .. #candidates .. " coins left", COLOR_GOLD)
                 task.wait(0.2)
             end
         end
@@ -2605,6 +2780,7 @@ do
         if autoCoinOn then
             autoCoinBtn.Text = "🪙 STOP AUTO COIN"
             setToggleVisual(autoCoinStroke, true)
+            setStatus("AUTO COIN ON", COLOR_GOLD)
             if not coinRunning then
                 coinRunning = true
                 task.spawn(autoCoinLoop)
@@ -2616,6 +2792,8 @@ do
         end
     end
 
+    local coinRoundMode = settings.coinRound == true
+    local roundActive = false
     local COIN_MIN, COIN_MAX = 20, 200
     local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
 
@@ -2771,8 +2949,6 @@ do
     end
 
     -- EACH ROUND mode: Auto Coin runs from the round start until the round ends
-    local coinRoundMode = settings.coinRound == true
-    local roundActive = false
     local function setCoinRunning(on)
         autoCoinOn = on
         if on and not coinRunning then
@@ -2787,11 +2963,11 @@ do
         if on then
             if roundActive then setCoinRunning(true) end
             autoCoinBtn.Text = "🪙 AUTO COIN: EACH ROUND"
-            setStatus("Auto Coin runs each round", COLOR_GOLD)
+            setStatus("AUTO COIN (EACH ROUND) ON", COLOR_GOLD)
         else
             setCoinRunning(false)
             autoCoinBtn.Text = "🪙 AUTO COIN"
-            setStatus("Auto Coin each round OFF")
+            setStatus("AUTO COIN (EACH ROUND) OFF")
         end
         setToggleVisual(autoCoinStroke, on)
     end
@@ -2809,13 +2985,20 @@ do
     if coinRoundMode then
         autoCoinBtn.Text = "🪙 AUTO COIN: EACH ROUND"
         setToggleVisual(autoCoinStroke, true)
+        -- loaded mid-round: coins already on the map means a round is running right now
+        task.defer(function()
+            if #getCoins() > 0 then
+                roundActive = true
+                setCoinRunning(true)
+            end
+        end)
     end
 
     getgenv().MM2HubClick(autoCoinBtn, "MouseButton1Click", function()
         if isMobile then
             openPanel()
         else
-            setCoinRound(not coinRoundMode)
+            toggleCoin()
         end
         refresh()
     end)
@@ -2885,7 +3068,7 @@ do
         if not on then
             setAnimateDisabled(player.Character, false)
         end
-        setStatus(on and "No Anim ON" or "No Anim OFF", on and COLOR_RED or COLOR_DIM)
+        setStatus(on and "NO ANIM ON" or "NO ANIM OFF")
     end)
 end
 
@@ -2895,7 +3078,7 @@ do
     local flingBtn, flingStroke = makeButton(playerPage, "🛡 ANTI FLING", 300, Color3.fromRGB(90, 200, 255))
     setToggleVisual(flingStroke, on)
 
-    local base = getgenv().MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
+    local base = getgenv().MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
     local AF = nil
     local okLoad, errLoad = pcall(function()
         AF = loadstring(game:HttpGet(base .. "MM2_AntiFling.lua?cb=" .. tostring(os.time())))()
@@ -2913,7 +3096,7 @@ do
         saveSettings()
         setToggleVisual(flingStroke, on)
         if AF then AF.setEnabled(on) end
-        setStatus(on and "Anti Fling ON" or "Anti Fling OFF", on and COLOR_GREEN or COLOR_DIM)
+        setStatus(on and "ANTI FLING ON" or "ANTI FLING OFF")
     end)
 end
 
@@ -2989,10 +3172,10 @@ do
         setToggleVisual(optStroke, on)
         if on then
             task.spawn(applyAll)
-            setStatus("⚙ Optimizer ON: textures and materials removed", COLOR_GREEN)
+            setStatus("OPTIMIZER ON", COLOR_GREEN)
         else
             restoreAll()
-            setStatus("Optimizer OFF: textures restored")
+            setStatus("OPTIMIZER OFF")
         end
     end)
 
@@ -3016,12 +3199,29 @@ local function forceNoclipChar(char)
     end
 end
 
+local invisSavedCollide = {} -- [BasePart] = CanCollide before invis touched it
+
+local function saveCollision(char)
+    table.clear(invisSavedCollide)
+    for _, p in ipairs(char:GetDescendants()) do
+        if p:IsA("BasePart") then
+            invisSavedCollide[p] = p.CanCollide
+        end
+    end
+end
+
+-- puts every part back exactly the way it was (the old version set EVERY part to
+-- CanCollide = true, including accessories and R15 limbs, which made collision glitchy)
 local function restoreCollision(char)
     for _, p in ipairs(char:GetDescendants()) do
         if p:IsA("BasePart") then
-            p.CanCollide = p.Name ~= "HumanoidRootPart"
+            local was = invisSavedCollide[p]
+            if was ~= nil then
+                p.CanCollide = was
+            end
         end
     end
+    table.clear(invisSavedCollide)
 end
 
 local function applyInvis(char)
@@ -3034,6 +3234,7 @@ local function applyInvis(char)
     invisSurface = hrp.Position.Y
     invisCamCF = camera.CFrame
     humanoid.CameraOffset = Vector3.new(0, 0, 0)
+    saveCollision(char)
     forceNoclipChar(char)
     invisSinking = true
 
@@ -3058,6 +3259,18 @@ local function removeInvis(char)
     invisRising = true
     invisCamCF = camera.CFrame
     local surfaceY = invisSurface or (hrp.Position.Y + INVIS_DEPTH)
+    -- you may have walked somewhere with a different floor height: raycast down for the real floor
+    do
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = { char }
+        local origin = Vector3.new(hrp.Position.X, surfaceY + 6, hrp.Position.Z)
+        local hit = workspace:Raycast(origin, Vector3.new(0, -80, 0), params)
+        if hit then
+            local hipHeight = humanoid.HipHeight > 0 and humanoid.HipHeight or 2
+            surfaceY = hit.Position.Y + hipHeight + hrp.Size.Y / 2 + 0.2
+        end
+    end
     local targetCF = CFrame.new(hrp.Position.X, surfaceY, hrp.Position.Z) * (hrp.CFrame - hrp.CFrame.Position)
 
     local riseTween = TweenService:Create(hrp, TweenInfo.new(0.6, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { CFrame = targetCF })
@@ -3066,13 +3279,17 @@ local function removeInvis(char)
         invisRising = false
         invisCamCF = nil
         invisSurface = nil
-        if humanoid then
-            humanoid.PlatformStand = false
-        end
-        task.wait(0.2)
+        pcall(function()
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end)
         if char and char.Parent then
             restoreCollision(char)
             camera.CameraType = Enum.CameraType.Custom
+        end
+        if humanoid then
+            humanoid.PlatformStand = false
+            pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end)
         end
     end)
 end
@@ -3087,13 +3304,13 @@ getgenv().MM2HubClick(invisBtn, "MouseButton1Click", function()
         invisBtn.Text = "◌ SHOW SELF"
         setToggleVisual(invisStroke, true)
         wasInvisBeforeRespawn = true
-        setStatus("Under map\nWalk normally, move mouse to look", Color3.fromRGB(180, 80, 255))
+        setStatus("INVIS ON", Color3.fromRGB(180, 80, 255))
         applyInvis(char)
     else
         invisBtn.Text = "◌ INVIS"
         setToggleVisual(invisStroke, false)
         wasInvisBeforeRespawn = false
-        setStatus("Surfacing...")
+        setStatus("INVIS OFF")
         removeInvis(char)
     end
 end)
@@ -3168,11 +3385,11 @@ getgenv().MM2HubClick(noclipJumpBtn, "MouseButton1Click", function()
     noclip = not noclip
     infiniteJump = not infiniteJump
     if noclip then
-        setStatus("⚡ Noclip & Inf Jump ON", Color3.fromRGB(0, 200, 180))
+        setStatus("NOCLIP / INF JUMP ON", Color3.fromRGB(0, 200, 180))
         setToggleVisual(noclipStroke, true)
         setCollisionForChar(player.Character, false)
     else
-        setStatus("⚡ Noclip & Inf Jump OFF")
+        setStatus("NOCLIP / INF JUMP OFF")
         setToggleVisual(noclipStroke, false)
         setCollisionForChar(player.Character, true)
     end
@@ -3197,7 +3414,7 @@ end)
 -- GAMES: the whole tab lives in MM2_Games.lua (and MM2_Chess.lua) so the main hub stays small
 -- ============================
 do
-    local base = getgenv().MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
+    local base = getgenv().MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
     local okGames, errGames = pcall(function()
         local build = loadstring(game:HttpGet(base .. "MM2_Games.lua?cb=" .. tostring(os.time())))()
         build({
@@ -3530,6 +3747,578 @@ getgenv().MM2HubBind(RunService.Heartbeat, function(dt)
 end)
 
 -- ============================
+-- MODULES TAB: add modules from a GitHub repo
+--   paste github.com/user/repo -> every *.module / *.module.lua file in it is listed,
+--   pick one, pick a category, press ADD MODULE
+-- ============================
+-- (wrapped in a function so its locals do not count toward the main chunk's 200 local limit)
+;(function()
+    local page = pages.MODULES
+    local BG = Color3.fromRGB(24, 24, 36)
+    local PANEL = Color3.fromRGB(18, 18, 28)
+    local ACCENT = THEMES.DEFAULT.accent
+    local LIST_H = 170
+
+    local function pretty(name)
+        if name == "ESP" or name == "UI" then return name end
+        return name:sub(1, 1) .. name:sub(2):lower()
+    end
+
+    -- textbox
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, 0, 0, 32)
+    box.BackgroundColor3 = BG
+    box.BorderSizePixel = 0
+    box.PlaceholderText = "github.com/gituser/reponame"
+    box.PlaceholderColor3 = Color3.fromRGB(90, 90, 120)
+    box.Text = ""
+    box.TextColor3 = COLOR_TEXT
+    box.TextSize = 14
+    box.Font = activeFont
+    box.ClearTextOnFocus = false
+    box.TextXAlignment = Enum.TextXAlignment.Left
+    box.ZIndex = 4
+    box.Parent = page
+    corner(box, 8)
+    local boxPad = Instance.new("UIPadding")
+    boxPad.PaddingLeft = UDim.new(0, 10)
+    boxPad.PaddingRight = UDim.new(0, 10)
+    boxPad.Parent = box
+    local boxStroke = Instance.new("UIStroke")
+    boxStroke.Color = ACCENT
+    boxStroke.Thickness = 1.2
+    boxStroke.Transparency = 0.6
+    boxStroke.Parent = box
+
+    local info = Instance.new("TextLabel")
+    info.Position = UDim2.fromOffset(2, 36)
+    info.Size = UDim2.new(1, -4, 0, 16)
+    info.BackgroundTransparency = 1
+    info.Text = "Paste a GitHub repo link"
+    info.TextColor3 = COLOR_DIM
+    info.TextSize = 12
+    info.Font = activeFont
+    info.TextXAlignment = Enum.TextXAlignment.Left
+    info.TextTruncate = Enum.TextTruncate.AtEnd
+    info.ZIndex = 4
+    info.Parent = page
+
+    local function mkButton(text, pos, size, color)
+        local b = Instance.new("TextButton")
+        b.Position = pos
+        b.Size = size
+        b.BackgroundColor3 = color
+        b.BorderSizePixel = 0
+        b.AutoButtonColor = false
+        b.Text = text
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.TextSize = 14
+        b.Font = activeFont
+        b.ZIndex = 4
+        b.Parent = page
+        corner(b, 8)
+        return b
+    end
+
+    local addBtn = mkButton("ADD MODULE", UDim2.fromOffset(0, 56), UDim2.new(0.6, -4, 0, 34), ACCENT)
+    local catBtn = mkButton("CATEGORY ▾", UDim2.new(0.6, 0, 0, 56), UDim2.new(0.4, 0, 0, 34), BG)
+
+    -- state
+    local files = {}           -- detected module files of the current repo
+    local pending = nil        -- the selected file, ready to add
+    local category = nil
+    local listOpen = false
+    local lastRepoKey = nil
+    local searchGen = 0
+
+    -- selected-file bar + file list (same spot; one is open at a time)
+    local selectedBar = Instance.new("TextButton")
+    selectedBar.Position = UDim2.fromOffset(0, 98)
+    selectedBar.Size = UDim2.new(1, 0, 0, 34)
+    selectedBar.BackgroundColor3 = PANEL
+    selectedBar.BorderSizePixel = 0
+    selectedBar.AutoButtonColor = false
+    selectedBar.Text = ""
+    selectedBar.TextColor3 = COLOR_GREEN
+    selectedBar.TextSize = 13
+    selectedBar.Font = activeFont
+    selectedBar.TextXAlignment = Enum.TextXAlignment.Left
+    selectedBar.TextTruncate = Enum.TextTruncate.AtEnd
+    selectedBar.Visible = false
+    selectedBar.ZIndex = 5
+    selectedBar.Parent = page
+    corner(selectedBar, 8)
+    local selPad = Instance.new("UIPadding")
+    selPad.PaddingLeft = UDim.new(0, 10)
+    selPad.PaddingRight = UDim.new(0, 10)
+    selPad.Parent = selectedBar
+
+    local list = Instance.new("ScrollingFrame")
+    list.Position = UDim2.fromOffset(0, 98)
+    list.Size = UDim2.new(1, 0, 0, 0)
+    list.BackgroundColor3 = PANEL
+    list.BorderSizePixel = 0
+    list.ScrollBarThickness = 3
+    list.ScrollBarImageColor3 = ACCENT
+    list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    list.CanvasSize = UDim2.new()
+    list.ClipsDescendants = true
+    list.Visible = false
+    list.ZIndex = 5
+    list.Parent = page
+    corner(list, 8)
+    local listPad = Instance.new("UIPadding")
+    listPad.PaddingTop = UDim.new(0, 6)
+    listPad.PaddingBottom = UDim.new(0, 6)
+    listPad.PaddingLeft = UDim.new(0, 6)
+    listPad.PaddingRight = UDim.new(0, 8)
+    listPad.Parent = list
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Padding = UDim.new(0, 4)
+    listLayout.Parent = list
+
+    local function setList(open)
+        listOpen = open
+        if open then
+            selectedBar.Visible = false
+            list.Visible = true
+            TweenService:Create(list, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { Size = UDim2.new(1, 0, 0, LIST_H) }):Play()
+        else
+            TweenService:Create(list, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { Size = UDim2.new(1, 0, 0, 0) }):Play()
+            task.delay(0.22, function()
+                if not listOpen then
+                    list.Visible = false
+                    selectedBar.Visible = pending ~= nil
+                end
+            end)
+        end
+    end
+
+    local function setInfo(text, color)
+        info.Text = text
+        info.TextColor3 = color or COLOR_DIM
+    end
+
+    local function fileName(path)
+        return path:match("([^/]+)$") or path
+    end
+
+    local function selectFile(file)
+        pending = file
+        selectedBar.Text = "✔ " .. file.path
+        setInfo("Ready: " .. fileName(file.path) .. (category and (" → " .. pretty(category)) or " (pick a category)"), COLOR_GREEN)
+        setList(false) -- selecting closes the list
+    end
+
+    local function fillList()
+        for _, c in ipairs(list:GetChildren()) do
+            if c:IsA("TextButton") then c:Destroy() end
+        end
+        for i, file in ipairs(files) do
+            local row = Instance.new("TextButton")
+            row.LayoutOrder = i
+            row.Size = UDim2.new(1, 0, 0, 30)
+            row.BackgroundColor3 = BG
+            row.BorderSizePixel = 0
+            row.AutoButtonColor = false
+            row.Text = file.path
+            row.TextColor3 = COLOR_TEXT
+            row.TextSize = 13
+            row.Font = activeFont
+            row.TextXAlignment = Enum.TextXAlignment.Left
+            row.TextTruncate = Enum.TextTruncate.AtEnd
+            row.ZIndex = 6
+            row.Parent = list
+            corner(row, 6)
+            local pad = Instance.new("UIPadding")
+            pad.PaddingLeft = UDim.new(0, 8)
+            pad.PaddingRight = UDim.new(0, 8)
+            pad.Parent = row
+            row.MouseEnter:Connect(function()
+                TweenService:Create(row, TweenInfo.new(0.1), { BackgroundColor3 = Color3.fromRGB(40, 40, 62) }):Play()
+            end)
+            row.MouseLeave:Connect(function()
+                TweenService:Create(row, TweenInfo.new(0.1), { BackgroundColor3 = BG }):Play()
+            end)
+            getgenv().MM2HubClick(row, "MouseButton1Click", function()
+                selectFile(file)
+            end)
+        end
+    end
+
+    getgenv().MM2HubClick(selectedBar, "MouseButton1Click", function()
+        if #files > 0 then setList(true) end -- tap the selection to pick a different file
+    end)
+
+    -- link parsing: github.com/user/repo, https://github.com/user/repo.git, .../tree/branch, user/repo
+    local function parseRepo(text)
+        text = (text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if text == "" then return nil end
+        local t = text:gsub("^https?://", ""):gsub("^www%.", "")
+        local rest = t:match("^github%.com/(.+)$")
+        if not rest and t:match("^[%w%-_%.]+/[%w%-_%.]+$") then rest = t end
+        if not rest then return nil end
+        local user, repo, tail = rest:match("^([%w%-_%.]+)/([%w%-_%.]+)(.*)$")
+        if not user then return nil end
+        repo = repo:gsub("%.git$", "")
+        if repo == "" then return nil end
+        local branch = tail and (tail:match("^/tree/(.+)$") or tail:match("^/blob/(.+)$"))
+        if branch then branch = branch:gsub("/+$", "") end
+        return user, repo, branch
+    end
+
+    local function isModuleFile(path)
+        local lower = path:lower()
+        return lower:match("%.module$") ~= nil
+            or lower:match("%.module%.lua$") ~= nil
+            or lower:match("%.module%.luau$") ~= nil
+    end
+
+    local function apiGet(url)
+        local ok, body = pcall(game.HttpGet, game, url)
+        if not ok or type(body) ~= "string" then return nil, "Couldn't reach GitHub (rate limit?)" end
+        local okJ, data = pcall(function() return HttpService:JSONDecode(body) end)
+        if not okJ or type(data) ~= "table" then return nil, "GitHub sent something unreadable" end
+        return data
+    end
+
+    -- branchPath: nil (default branch) or "branch" / "branch/sub/folder" from a /tree/ link.
+    -- Branch names can contain "/", so the longest prefix that is a real branch wins;
+    -- whatever is left over is a folder inside the repo (only modules in it are listed).
+    local function fetchModules(user, repo, branchPath)
+        local base = "https://api.github.com/repos/" .. user .. "/" .. repo
+        local branch, folder, tree, err
+        if not branchPath then
+            local data, e = apiGet(base)
+            if not data then return nil, e end
+            if not data.default_branch then return nil, "Repo not found" end
+            branch = data.default_branch
+            tree, err = apiGet(base .. "/git/trees/" .. branch .. "?recursive=1")
+        else
+            local segs = {}
+            for seg in branchPath:gmatch("[^/]+") do table.insert(segs, seg) end
+            for k = #segs, 1, -1 do
+                local try = table.concat(segs, "/", 1, k)
+                local t, e = apiGet(base .. "/git/trees/" .. try:gsub("[^%w%-_%./]", function(c)
+                    return string.format("%%%02X", c:byte())
+                end) .. "?recursive=1")
+                if t and type(t.tree) == "table" then
+                    branch, tree = try, t
+                    if k < #segs then folder = table.concat(segs, "/", k + 1) end
+                    break
+                end
+                err = e
+            end
+        end
+        if not tree then return nil, err or "Repo or branch not found" end
+        if type(tree.tree) ~= "table" then return nil, "Repo or branch not found" end
+        local found = {}
+        for _, item in ipairs(tree.tree) do
+            if item.type == "blob" and type(item.path) == "string" and isModuleFile(item.path)
+                and (not folder or item.path:sub(1, #folder + 1) == folder .. "/") then
+                local encoded = item.path:gsub("[^%w%-_%./]", function(c)
+                    return string.format("%%%02X", c:byte())
+                end)
+                local encBranch = branch:gsub("[^%w%-_%./]", function(c)
+                    return string.format("%%%02X", c:byte())
+                end)
+                table.insert(found, {
+                    user = user, repo = repo, branch = branch, path = item.path,
+                    url = "https://raw.githubusercontent.com/" .. user .. "/" .. repo .. "/" .. encBranch .. "/" .. encoded,
+                })
+            end
+        end
+        table.sort(found, function(x, y) return x.path:lower() < y.path:lower() end)
+        return found
+    end
+
+    local function search(force)
+        local user, repo, branch = parseRepo(box.Text)
+        if not user then
+            if box.Text:gsub("%s", "") ~= "" and force then
+                setInfo("Use a link like github.com/user/repo", COLOR_RED)
+            end
+            return
+        end
+        local key = (user .. "/" .. repo .. "@" .. tostring(branch)):lower()
+        if key == lastRepoKey and not force then return end
+        lastRepoKey = key
+        searchGen = searchGen + 1
+        local gen = searchGen
+        pending = nil
+        selectedBar.Visible = false
+        setInfo("Fetching " .. user .. "/" .. repo .. "...", COLOR_GOLD)
+        task.spawn(function()
+            local found, err = fetchModules(user, repo, branch)
+            if gen ~= searchGen then return end -- the link changed while we were fetching
+            if not found then
+                files = {}
+                lastRepoKey = nil
+                fillList()
+                setList(false)
+                setInfo(err or "Couldn't read that repo", COLOR_RED)
+                return
+            end
+            files = found
+            fillList()
+            if #found == 0 then
+                setList(false)
+                setInfo("No .module files found in " .. user .. "/" .. repo, COLOR_RED)
+            else
+                setInfo("Found " .. #found .. " module file" .. (#found == 1 and "" or "s") .. ": pick one", COLOR_GREEN)
+                setList(true)
+            end
+        end)
+    end
+
+    -- retrieves automatically shortly after typing/pasting stops (or instantly on Enter / leaving the box)
+    box:GetPropertyChangedSignal("Text"):Connect(function()
+        local gen = searchGen
+        local snapshot = box.Text
+        task.delay(0.8, function()
+            if box.Text == snapshot and searchGen == gen then search(false) end
+        end)
+    end)
+    box.FocusLost:Connect(function()
+        search(true)
+    end)
+
+    -- category dropdown: slides down under the CATEGORY button
+    local cats = {}
+    for _, name in ipairs(TAB_NAMES) do
+        if name ~= "MODULES" and name ~= "MY MODULES" then table.insert(cats, name) end
+    end
+    local ROW_H = 28
+    local DROP_H = #cats * ROW_H + 8
+
+    local drop = Instance.new("Frame")
+    drop.Position = UDim2.new(0.6, 0, 0, 94)
+    drop.Size = UDim2.new(0.4, 0, 0, 0)
+    drop.BackgroundColor3 = PANEL
+    drop.BorderSizePixel = 0
+    drop.ClipsDescendants = true
+    drop.Visible = false
+    drop.ZIndex = 20
+    drop.Parent = page
+    corner(drop, 8)
+    local dropStroke = Instance.new("UIStroke")
+    dropStroke.Color = ACCENT
+    dropStroke.Thickness = 1.2
+    dropStroke.Transparency = 0.4
+    dropStroke.Parent = drop
+    local dropLayout = Instance.new("UIListLayout")
+    dropLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    dropLayout.Padding = UDim.new(0, 0)
+    dropLayout.Parent = drop
+    local dropPad = Instance.new("UIPadding")
+    dropPad.PaddingTop = UDim.new(0, 4)
+    dropPad.PaddingLeft = UDim.new(0, 4)
+    dropPad.PaddingRight = UDim.new(0, 4)
+    dropPad.Parent = drop
+
+    local dropOpen = false
+    local function setDrop(open)
+        dropOpen = open
+        catBtn.Text = (category and pretty(category) or "CATEGORY") .. (open and " ▴" or " ▾")
+        if open then
+            drop.Visible = true
+            TweenService:Create(drop, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { Size = UDim2.new(0.4, 0, 0, DROP_H) }):Play()
+        else
+            TweenService:Create(drop, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { Size = UDim2.new(0.4, 0, 0, 0) }):Play()
+            task.delay(0.22, function()
+                if not dropOpen then drop.Visible = false end
+            end)
+        end
+    end
+
+    for i, name in ipairs(cats) do
+        local row = Instance.new("TextButton")
+        row.LayoutOrder = i
+        row.Size = UDim2.new(1, 0, 0, ROW_H)
+        row.BackgroundTransparency = 1
+        row.BackgroundColor3 = Color3.fromRGB(40, 40, 62)
+        row.BorderSizePixel = 0
+        row.AutoButtonColor = false
+        row.Text = pretty(name)
+        row.TextColor3 = COLOR_TEXT
+        row.TextSize = 14
+        row.Font = activeFont
+        row.ZIndex = 21
+        row.Parent = drop
+        corner(row, 6)
+        row.MouseEnter:Connect(function()
+            TweenService:Create(row, TweenInfo.new(0.1), { BackgroundTransparency = 0 }):Play()
+        end)
+        row.MouseLeave:Connect(function()
+            TweenService:Create(row, TweenInfo.new(0.1), { BackgroundTransparency = 1 }):Play()
+        end)
+        getgenv().MM2HubClick(row, "MouseButton1Click", function()
+            category = name
+            setDrop(false)
+            if pending then
+                setInfo("Ready: " .. fileName(pending.path) .. " → " .. pretty(category), COLOR_GREEN)
+            end
+        end)
+    end
+
+    getgenv().MM2HubClick(catBtn, "MouseButton1Click", function()
+        setDrop(not dropOpen)
+    end)
+
+    -- ADD MODULE: checks that the selected file downloads and compiles, then saves it with its category
+    local adding = false
+    getgenv().MM2HubClick(addBtn, "MouseButton1Click", function()
+        if adding then return end
+        if not pending then
+            setStatus("Select a module file first", COLOR_RED)
+            return
+        end
+        if not category then
+            setStatus("Pick a category first", COLOR_RED)
+            setDrop(true)
+            return
+        end
+        adding = true
+        local file = pending
+        local cat = category
+        setInfo("Downloading " .. fileName(file.path) .. "...", COLOR_GOLD)
+        task.spawn(function()
+            local ok, src = pcall(game.HttpGet, game, file.url)
+            if not ok or type(src) ~= "string" or #src < 5 or src:sub(1, 3) == "404" then
+                setInfo("Couldn't download that file", COLOR_RED)
+                adding = false
+                return
+            end
+            local fn, err = loadstring(src)
+            if not fn then
+                warn("MM2 Hub: module syntax error: " .. tostring(err))
+                setInfo("That module has a syntax error", COLOR_RED)
+                adding = false
+                return
+            end
+            settings.customModules = type(settings.customModules) == "table" and settings.customModules or {}
+            local replaced = false
+            for _, m in ipairs(settings.customModules) do
+                if m.url == file.url then
+                    m.category = cat
+                    replaced = true
+                end
+            end
+            if not replaced then
+                table.insert(settings.customModules, {
+                    user = file.user, repo = file.repo, branch = file.branch,
+                    path = file.path, url = file.url, category = cat,
+                })
+            end
+            saveSettings()
+            if getgenv().MM2HubRefreshMyModules then pcall(getgenv().MM2HubRefreshMyModules) end
+            setInfo("Added " .. fileName(file.path) .. " → " .. pretty(cat), COLOR_GREEN)
+            setStatus("Module added: " .. fileName(file.path) .. " → " .. pretty(cat), COLOR_GREEN)
+            adding = false
+        end)
+    end)
+end)()
+
+-- ============================
+-- MY MODULES TAB: the modules added in the MODULES tab (tap X to remove one)
+-- ============================
+;(function()
+    local page = pages["MY MODULES"]
+    local BG = Color3.fromRGB(24, 24, 36)
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.CanvasSize = UDim2.new()
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 6)
+    layout.Parent = page
+
+    local function refresh()
+        for _, c in ipairs(page:GetChildren()) do
+            if c:IsA("GuiObject") then c:Destroy() end
+        end
+        local mods = type(settings.customModules) == "table" and settings.customModules or {}
+        if #mods == 0 then
+            local empty = Instance.new("TextLabel")
+            empty.Size = UDim2.new(1, 0, 0, 34)
+            empty.BackgroundTransparency = 1
+            empty.Text = "No modules yet. Add one in the MODULES tab."
+            empty.TextColor3 = COLOR_DIM
+            empty.TextSize = 13
+            empty.Font = activeFont
+            empty.TextWrapped = true
+            empty.ZIndex = 4
+            empty.Parent = page
+            return
+        end
+        for i, m in ipairs(mods) do
+            local row = Instance.new("Frame")
+            row.LayoutOrder = i
+            row.Size = UDim2.new(1, -6, 0, 44)
+            row.BackgroundColor3 = BG
+            row.BackgroundTransparency = 0.2
+            row.BorderSizePixel = 0
+            row.ZIndex = 3
+            row.Parent = page
+            corner(row, 8)
+            local stroke = Instance.new("UIStroke")
+            stroke.Color = THEMES.DEFAULT.accent
+            stroke.Thickness = 1.2
+            stroke.Transparency = 0.6
+            stroke.Parent = row
+
+            local name = Instance.new("TextLabel")
+            name.Position = UDim2.fromOffset(12, 4)
+            name.Size = UDim2.new(1, -52, 0, 20)
+            name.BackgroundTransparency = 1
+            name.Text = tostring(m.path or ""):match("([^/]+)$") or "module"
+            name.TextColor3 = COLOR_TEXT
+            name.TextSize = 14
+            name.Font = activeFont
+            name.TextXAlignment = Enum.TextXAlignment.Left
+            name.TextTruncate = Enum.TextTruncate.AtEnd
+            name.ZIndex = 4
+            name.Parent = row
+
+            local sub = name:Clone()
+            sub.Position = UDim2.fromOffset(12, 24)
+            sub.Size = UDim2.new(1, -52, 0, 16)
+            local cat = tostring(m.category or "")
+            sub.Text = tostring(m.user) .. "/" .. tostring(m.repo) .. "  •  " .. cat:sub(1, 1) .. cat:sub(2):lower()
+            sub.TextColor3 = COLOR_DIM
+            sub.TextSize = 12
+            sub.Parent = row
+
+            local del = Instance.new("TextButton")
+            del.Position = UDim2.new(1, -36, 0.5, -14)
+            del.Size = UDim2.fromOffset(28, 28)
+            del.BackgroundColor3 = Color3.fromRGB(40, 30, 38)
+            del.BorderSizePixel = 0
+            del.AutoButtonColor = false
+            del.Text = "✕"
+            del.TextColor3 = COLOR_RED
+            del.TextSize = 14
+            del.Font = activeFont
+            del.ZIndex = 4
+            del.Parent = row
+            corner(del, 6)
+            getgenv().MM2HubClick(del, "MouseButton1Click", function()
+                table.remove(mods, i)
+                saveSettings()
+                setStatus("Module removed: " .. tostring(name.Text), COLOR_DIM)
+                refresh()
+            end)
+        end
+    end
+    getgenv().MM2HubRefreshMyModules = refresh
+    refresh()
+end)()
+
+-- ============================
 -- START
 -- ============================
 applyBackground()
@@ -3619,7 +4408,7 @@ do
     -- downloads and compiles a UI file; returns the function, or nil and a message
     local function prepare(key)
         local info = UI_FILES[key]
-        local base = G.MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
+        local base = G.MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
         local okSrc, src = pcall(game.HttpGet, game, base .. info.file .. "?cb=" .. tostring(os.time()))
         if not okSrc or type(src) ~= "string" or #src < 200 then
             return nil, "Couldn't download the " .. info.name .. " hub"
@@ -4016,4 +4805,4 @@ if getgenv().MM2HubNotice then
     getgenv().MM2HubNotice = nil
 end
 
-print("MM2 Helper v3.18 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.19 Loaded - toast notifications, live See All, safe reach hitbox, fixed invis + auto coin")
