@@ -14,7 +14,7 @@ local TweenService = game:GetService("TweenService")
 local BASE = getgenv().MM2HubBase or "https://raw.githubusercontent.com/crackalacka345/TakeDatRisk/main/"
 local FILES = { "bg_module.lua", "gif_module.lua", "MM2_Helper.lua" }
 local BACKUP_PREFIX = "MM2Hub_backup_"
-local PHASE_WAIT = 0.6
+local PHASE_WAIT = 0.15 -- short pause between boot phases (was 0.6, made every start slow)
 
 local U = {}
 
@@ -22,12 +22,45 @@ local function fetch(name)
     return game:HttpGet(BASE .. name .. "?cb=" .. tostring(os.time()) .. tostring(math.floor(os.clock() * 1000)))
 end
 
+-- downloads every file at the same time (they used to download one after another)
 local function fetchAll()
-    local src = {}
+    local src, failed = {}, nil
+    local pending = #FILES
     for _, name in ipairs(FILES) do
-        src[name] = fetch(name)
+        task.spawn(function()
+            local ok, res = pcall(fetch, name)
+            if ok and type(res) == "string" and #res > 50 and string.sub(res, 1, 3) ~= "404" then
+                src[name] = res
+            else
+                failed = failed or (name .. ": " .. tostring(res))
+            end
+            pending = pending - 1
+        end)
     end
+    local t0 = os.clock()
+    while pending > 0 do
+        if os.clock() - t0 > 25 then error("download timed out", 0) end
+        task.wait()
+    end
+    if failed then error(failed, 0) end
     return src
+end
+
+-- version of a bundle, read from the "-- MM2 Helper v3.18" header line of MM2_Helper.lua
+local function bundleVersion(bundle)
+    local head = bundle and bundle["MM2_Helper.lua"] and string.sub(bundle["MM2_Helper.lua"], 1, 300)
+    return head and string.match(head, "MM2 Helper v([%d%.]+)") or nil
+end
+
+-- returns the new version string ONLY when the repo changed since the last copy that ran
+local function detectUpdate(src, previous)
+    if not previous then return nil end -- first install, nothing was updated
+    for _, name in ipairs(FILES) do
+        if previous[name] ~= src[name] then
+            return bundleVersion(src) or "?"
+        end
+    end
+    return nil
 end
 
 local function sameAs(last, src)
@@ -67,6 +100,19 @@ local function makeBoot()
     label.TextXAlignment = Enum.TextXAlignment.Right
     label.Parent = lg
 
+    -- "Updated to v3.19": shown only when the repo changed since the last run
+    local updatedLabel = Instance.new("TextLabel")
+    updatedLabel.Size = UDim2.new(0, 320, 0, 16)
+    updatedLabel.AnchorPoint = Vector2.new(1, 1)
+    updatedLabel.Position = UDim2.new(1, -20, 1, -98)
+    updatedLabel.BackgroundTransparency = 1
+    updatedLabel.Text = ""
+    updatedLabel.TextColor3 = Color3.fromRGB(100, 255, 120)
+    updatedLabel.TextScaled = true
+    updatedLabel.Font = Enum.Font.GothamBold
+    updatedLabel.TextXAlignment = Enum.TextXAlignment.Right
+    updatedLabel.Parent = lg
+
     local barBack = Instance.new("Frame")
     barBack.Size = UDim2.new(0, 220, 0, 10)
     barBack.AnchorPoint = Vector2.new(1, 1)
@@ -82,6 +128,10 @@ local function makeBoot()
     barFill.Parent = barBack
 
     local boot = { ready = false }
+
+    function boot.setUpdated(ver)
+        updatedLabel.Text = "Updated to v" .. tostring(ver)
+    end
 
     function boot.setStatus(text, progress)
         label.Text = text
@@ -110,6 +160,7 @@ local function makeBoot()
         task.spawn(function()
             while not boot.ready do task.wait(0.05) end
             TweenService:Create(label, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
+            TweenService:Create(updatedLabel, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
             TweenService:Create(barBack, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
             TweenService:Create(barFill, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
             TweenService:Create(blur, TweenInfo.new(0.5), { Size = 0 }):Play()
@@ -134,7 +185,7 @@ local function teardown()
 
     local playerGui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if playerGui then
-        for _, name in ipairs({ "MM2_Helper_GUI", "MM2Hub_Notice", "MM2Hub_Loading", "MM2Hub_ShootRing", "MM2Hub_StackGame" }) do
+        for _, name in ipairs({ "MM2_Helper_GUI", "MM2Hub_Notice", "MM2Hub_Notify", "MM2Hub_Loading", "MM2Hub_ShootRing", "MM2Hub_StackGame" }) do
             local g = playerGui:FindFirstChild(name)
             if g then g:Destroy() end
         end
@@ -155,7 +206,7 @@ end
 
 local function listVersions()
     local found = {}
-    local okA, body = pcall(game.HttpGet, game, "https://api.github.com/repos/fwerscripts43/TakeDatRisk/contents/versions")
+    local okA, body = pcall(game.HttpGet, game, "https://api.github.com/repos/crackalacka345/TakeDatRisk/contents/versions")
     if okA and type(body) == "string" then
         local okJ, data = pcall(function()
             return game:GetService("HttpService"):JSONDecode(body)
@@ -470,7 +521,9 @@ local function deploy(src, boot)
 
     teardown()
     getgenv().MM2HubBoot = boot
-    boot.setStatus("LOADING HUB", 0.7)
+    boot.setStatus("LOADING HUB", 0.65)
+    task.wait(PHASE_WAIT)
+    boot.setStatus("Loading your Modules..", 0.8)
     task.wait(PHASE_WAIT)
 
     local ok, err = pcall(runAll, bundle)
@@ -487,8 +540,8 @@ local function deploy(src, boot)
 
     if not fellBack then writeBackup(bundle) end
 
-    boot.setStatus("CHECKING FOR NON WORKING FUNCTIONS", 0.9)
-    task.wait(1)
+    boot.setStatus("CHECKING FOR NON WORKING FUNCTIONS", 0.92)
+    task.wait(0.3)
     boot.setStatus("READY", 1)
     boot.ready = true
     task.delay(3, boot.abort)
@@ -497,19 +550,19 @@ end
 
 -- REFRESH button: ok, message
 function U.refresh(force)
-    local boot = makeBoot()
-    boot.setStatus("CHECKING FOR UPDATES", 0.15)
-    task.wait(PHASE_WAIT)
-
+    -- check silently first: when nothing changed this returns right away (no overlay, no blur, no waiting)
     local okF, src = pcall(fetchAll)
     if not okF then
-        boot.abort()
         return false, "Couldn't reach GitHub"
     end
     if not force and sameAs(getgenv().MM2HubSrc, src) then
-        boot.abort()
         return true, "Already up to date"
     end
+
+    local boot = makeBoot()
+    boot.setStatus("CHECKING FOR UPDATES", 0.2)
+    local newVer = detectUpdate(src, getgenv().MM2HubSrc or backupBundle())
+    if newVer then boot.setUpdated(newVer) end
 
     local okD, fellBackOrErr = pcall(deploy, src, boot)
     if not okD then
@@ -518,7 +571,7 @@ function U.refresh(force)
         return false, "Update failed (see the error on screen)"
     end
     getgenv().MM2HubSrc = src
-    getgenv().MM2HubNotice = fellBackOrErr and "New version had errors, loaded backup" or "Updated to the latest version"
+    getgenv().MM2HubNotice = fellBackOrErr and "New version had errors, loaded backup" or (newVer and ("Updated to v" .. newVer) or "Updated to the latest version")
     return true, "Updated"
 end
 
@@ -602,12 +655,15 @@ getgenv().MM2HubRestart = U.restart
 -- first run
 local boot = makeBoot()
 boot.setStatus("CHECKING FOR UPDATES", 0.15)
-task.wait(PHASE_WAIT)
 
+local previous = backupBundle() -- the last copy that started successfully
 local okF, src = pcall(fetchAll)
 if not okF then
     warn("MM2 Hub: couldn't reach GitHub, using the backup: " .. tostring(src))
-    src = backupBundle()
+    src = previous
+else
+    local newVer = detectUpdate(src, previous)
+    if newVer then boot.setUpdated(newVer) end
 end
 
 if not src then
