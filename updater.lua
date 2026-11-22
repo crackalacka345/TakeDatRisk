@@ -197,7 +197,7 @@ end
 getgenv().MM2HubTeardown = teardown
 
 -- VERSIONS: the repo's versions/ folder (newest first), with a check of which ones work
-local FALLBACK_VERSIONS = { "2.8", "2.9", "3.0", "3.2", "3.4", "3.5", "3.6", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15", "3.16", "3.17", "3.18" }
+local FALLBACK_VERSIONS = { "2.8", "2.9", "3.0", "3.2", "3.4", "3.5", "3.6", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15", "3.16", "3.17", "3.18", "3.19", "3.20", "3.21", "3.31" }
 
 local function versionKey(v)
     local a, b = string.match(v, "^(%d+)%.(%d+)")
